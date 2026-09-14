@@ -394,6 +394,10 @@ dialog[open] { animation: rise .18s ease-out; }
 .location-modes button { flex: 1; padding: 9px 5px; border-radius: 8px; background: transparent; font-size: 13px; font-weight: 550; }
 .location-modes button[aria-pressed="true"] { background: rgba(255,255,255,.94); box-shadow: 0 1px 4px rgba(0,0,0,.12); }
 .location-modes button:focus-visible { outline: 2px solid var(--blue); }
+.route-type-control { margin: -4px 0 14px; }
+.route-type-control > span { display: block; margin-bottom: 7px; color: var(--secondary); font-size: 12px; font-weight: 600; }
+.route-type-modes { margin: 0; }
+.route-type-modes button[aria-pressed="true"][data-route-mode="train"] { color: #9b205d; }
 #add-route-stop { width: 100%; }
 .route-stops { list-style: none; padding: 0; margin: 14px 0; }
 .route-stops li { display: flex; gap: 9px; align-items: center; padding: 9px 0; }
@@ -419,6 +423,7 @@ dialog[open] { animation: rise .18s ease-out; }
 .route-active #destination-summary,
 .route-active #coordinate-form,
 .route-active .coordinate-hint,
+.route-active .route-type-control,
 .route-active #add-route-stop,
 .route-active .route-plan-actions,
 .route-active .route-provider,

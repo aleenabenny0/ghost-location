@@ -18,7 +18,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'ghost', privileges: { standard:
 
 let window, controller, poll, wakeLock, quitting = false, quitPending = false;
 const geocoder = new Geocoder();
-const allowedExternal = new Set(['github.com', 'developer.android.com', 'developer.apple.com', 'support.apple.com', 'www.openstreetmap.org', 'openstreetmap.org', 'photon.komoot.io', 'doronz88.github.io']);
+const allowedExternal = new Set(['github.com', 'developer.android.com', 'developer.apple.com', 'support.apple.com', 'www.openstreetmap.org', 'openstreetmap.org', 'photon.komoot.io', 'doronz88.github.io', 'transitous.org', 'www.openrailwaymap.org']);
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { window?.show(); window?.focus(); });
@@ -36,7 +36,7 @@ async function boot() {
     if (!target.startsWith(`${dist}${path.sep}`)) return new Response('Not found', { status: 404 });
     return net.fetch(pathToFileURL(target).toString());
   });
-  const csp = `default-src 'self'; script-src 'self'${devUrl ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self'${devUrl ? ' ws://127.0.0.1:5173' : ''}; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'`;
+  const csp = `default-src 'self'; script-src 'self'${devUrl ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://tiles.openrailwaymap.org; connect-src 'self'${devUrl ? ' ws://127.0.0.1:5173' : ''}; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'`;
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
   });

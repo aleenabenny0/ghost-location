@@ -86,6 +86,19 @@ Ghost displays command acknowledgements on iPhone and helper readbacks on Androi
 
 The speed is constant, regardless of road limits or traffic. The blue dot represents the last sent point. Keep Ghost running, the cable connected, and the computer awake. Minimizing Ghost does not stop playback. Unplugging, sleep, or slow updates pause movement; reconnect the same phone and press **Resume**. Restarting Ghost does not recover route geometry.
 
+## Follow a train route
+
+1. Select **Route**, then choose **Train**. The railway overlay appears on the map.
+2. Add one point within 2 km of the departure station and one point within 2 km of the arrival station.
+3. Click **Find direct train route**. This first version finds one direct current train service; transfers are not supported.
+4. Inspect the train line, service, distance, scheduled travel time, and calculated average speed.
+5. Click **Start train**. Ghost moves the phone along the returned railway geometry with one-second updates.
+6. Pause, resume, and restore real location in the same way as a road route.
+
+Train coverage depends on the public transport feeds available through Transitous. The
+simulation uses one constant average speed calculated from the train path and scheduled
+duration. It does not reproduce acceleration, braking, or every station dwell.
+
 ## If something goes wrong
 
 | What you see | What to do |

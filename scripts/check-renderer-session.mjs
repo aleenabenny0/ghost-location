@@ -127,6 +127,11 @@ try {
   assert.match(await page.locator('#session-refresh').textContent(), /phone-app location is not verified/);
 
   await page.locator('[data-location-mode="route"]').click();
+  await page.locator('[data-route-mode="train"]').click();
+  assert.equal(await page.locator('[data-route-mode="train"]').getAttribute('aria-pressed'), 'true');
+  assert.match(await page.locator('#route-provider').textContent(), /Transitous.*OpenRailwayMap/);
+  assert.equal(await page.locator('#plan-route').textContent(), 'Find direct train route');
+  await page.locator('[data-route-mode="road"]').click();
   for (const [latitude, longitude] of [[41.8827, -87.6233], [41.89, -87.63]]) {
     await page.locator('#latitude').fill(String(latitude));
     await page.locator('#longitude').fill(String(longitude));
@@ -153,6 +158,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#route-play').textContent === 'Pause route');
   const routeCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method !== 'applyLocation');
   assert.deepEqual(routeCalls.map(c => c.method), ['planRoute', 'startRoute', 'pauseRoute', 'resumeRoute']);
+  assert.equal(routeCalls[0].mode, 'road');
   assert.equal(routeCalls[1].deviceId, phone.id);
   assert.equal(routeCalls[1].routeId, 'test-route');
   const artifacts = path.join(root, 'artifacts'); await mkdir(artifacts, {recursive: true});

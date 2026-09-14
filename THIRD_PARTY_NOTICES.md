@@ -41,3 +41,17 @@ The service uses OpenStreetMap data (ODbL). Stop coordinates are sent to the ser
 when the user plans a route; playback uses the downloaded geometry locally.
 Demo limits: reasonable noncommercial use, at most one request per second, no uptime guarantee.
 https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server
+
+
+Train routing uses the community-run Transitous MOTIS 2 API on explicit request.
+Ghost sends the selected start and destination coordinates, requests a direct rail
+itinerary, and downloads its encoded geometry and timing. Playback then uses that
+geometry locally. Transitous is provided for light, open-source, noncommercial use
+on a best-effort basis and requires an identifying User-Agent and visible source
+attribution: https://transitous.org/api/
+The underlying GTFS and other transit datasets retain the terms listed at
+https://transitous.org/sources/
+
+Train mode requests railway overlay tiles from OpenRailwayMap. OpenRailwayMap renders
+railway data contributed to OpenStreetMap; attribution remains visible on the map.
+https://www.openrailwaymap.org/

@@ -81,6 +81,7 @@ let selectedDeviceId = null;
 let selectedPlace = null;
 let currentView = 'map';
 let locationMode = 'fixed';
+let routeTravelMode = 'road';
 let routeStops = [], routePlan = null;
 let routeLine = null, routeDot = null;
 const routeMarkers = [];
@@ -137,10 +138,11 @@ $('#app').innerHTML = `
           <form id="coordinate-form" class="coordinate-form"><label><span>Latitude</span><input id="latitude" type="number" min="-90" max="90" step="any" placeholder="41.88270" required aria-label="Latitude" /></label><label><span>Longitude</span><input id="longitude" type="number" min="-180" max="180" step="any" placeholder="−87.62330" required aria-label="Longitude" /></label><button type="submit" class="coordinate-submit" aria-label="Select these coordinates" title="Select these coordinates">${icon('arrow-right')}</button></form>
           <p class="coordinate-hint">Search, enter coordinates, or click the map.</p>
           <div id="route-controls" hidden>
+            <div class="route-type-control"><span>Travel mode</span><div class="location-modes route-type-modes" role="group" aria-label="Route travel mode"><button data-route-mode="road" aria-pressed="true">Road</button><button data-route-mode="train" aria-pressed="false">Train</button></div></div>
             <button id="add-route-stop" class="secondary-button">${icon('plus')} Add selected pin to route</button>
             <ol id="route-stops" class="route-stops"></ol>
             <div class="route-plan-actions"><button id="plan-route" class="secondary-button">Plan road route</button><button id="clear-route" class="text-button">Clear</button></div>
-            <p class="route-provider">Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.</p>
+            <p id="route-provider" class="route-provider">Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.</p>
             <div id="route-summary" class="route-summary" hidden></div>
             <button id="route-play" class="primary-button" disabled>Start route · 45 mph</button>
             <p id="route-hint" class="action-hint">Add a start and destination, in order.</p>
@@ -208,6 +210,7 @@ $('#app').innerHTML = `
 const map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 2, maxZoom: 19, worldCopyJump: true }).setView([41.8827, -87.6233], 13);
 map.attributionControl.setPrefix(false);
 const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors', keepBuffer: 1, updateWhenIdle: true }).addTo(map);
+const railTiles = L.tileLayer('https://tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', { maxZoom: 19, opacity: 0.78, attribution: 'Railways: © <a href="https://www.openrailwaymap.org/" target="_blank" rel="noreferrer">OpenRailwayMap</a>' });
 let tileErrors = 0;
 tiles.on('tileerror', () => { if (++tileErrors >= 3) $('#map-error').hidden = false; });
 tiles.on('tileload', () => { tileErrors = 0; $('#map-error').hidden = true; });
@@ -230,7 +233,7 @@ function notify(message, error = false) {
 function acceptState(next) {
   if (!next?.devices) return;
   state = { ...state, ...next };
-  if (state.route) locationMode = 'route';
+  if (state.route) { locationMode = 'route'; routeTravelMode = state.route.mode || routeTravelMode; }
   if (!state.devices.some((device) => device.id === selectedDeviceId)) selectedDeviceId = state.devices.find((device) => device.id === state.session?.deviceId)?.id || state.devices[0]?.id || state.session?.deviceId || null;
   setupHost = state.preferences.hostPlatform || setupHost || detectedHost;
   setupPlatform = state.preferences.phonePlatform || state.devices.find((device) => device.id === selectedDeviceId)?.platform || setupPlatform;
@@ -344,11 +347,17 @@ const routeTime = seconds => seconds < 60 ? `${Math.ceil(seconds)} sec` : second
 function fitRoute() {
   if (routeLine) map.fitBounds(routeLine.getBounds(), { paddingTopLeft: [390, 95], paddingBottomRight: [85, 160], maxZoom: 16 });
 }
+function syncRailOverlay() {
+  const show = locationMode === 'route' && routeTravelMode === 'train';
+  if (show && !map.hasLayer(railTiles)) railTiles.addTo(map);
+  if (!show && map.hasLayer(railTiles)) railTiles.remove();
+}
 function drawRoute() {
+  syncRailOverlay();
   if (routeLine) { routeLine.remove(); routeLine = null; }
   routeMarkers.splice(0).forEach(item => item.remove());
   if (locationMode !== 'route') return;
-  if (routePlan) routeLine = L.polyline(routePlan.coordinates.map(([lon, lat]) => [lat, lon]), { color: '#087bff', weight: 5, opacity: 0.85, interactive: false }).addTo(map);
+  if (routePlan) routeLine = L.polyline(routePlan.coordinates.map(([lon, lat]) => [lat, lon]), { color: routePlan.mode === 'train' ? '#b52a6f' : '#087bff', weight: 5, opacity: 0.88, interactive: false }).addTo(map);
   routeStops.forEach((stop, index) => {
     const latlng = index === 0 && routePlan ? [...routePlan.coordinates[0]].reverse() : index === routeStops.length - 1 && routePlan ? [...routePlan.coordinates.at(-1)].reverse() : [stop.latitude, stop.longitude];
     routeMarkers.push(L.marker(latlng, { interactive: false, icon: L.divIcon({ className: 'route-stop-marker', html: `<span>${index + 1}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(map));
@@ -357,6 +366,11 @@ function drawRoute() {
 function renderRoute() {
   const route = state.route, active = Boolean(route && state.session), inRoute = locationMode === 'route';
   const busy = pending || state.busy;
+  const mode = route?.mode || routePlan?.mode || routeTravelMode;
+  const isTrain = mode === 'train';
+  const maximumStops = isTrain ? 2 : 12;
+  const speedMph = route?.speedMph || routePlan?.speedMph || 45;
+  const speedLabel = isTrain ? `about ${Math.max(1, Math.round(speedMph))} mph average` : '45 mph';
   const panel = $('.control-panel'), wasActive = panel.classList.contains('route-active');
   panel.classList.toggle('route-active', active);
   if (active && !wasActive) $('.panel-scroll').scrollTop = 0;
@@ -364,31 +378,49 @@ function renderRoute() {
     if (active && map.hasLayer(marker)) marker.remove();
     if (!active && !map.hasLayer(marker)) marker.addTo(map);
   }
+  syncRailOverlay();
   $('#route-controls').hidden = !inRoute;
   $('#fixed-actions').hidden = inRoute;
   document.querySelectorAll('[data-location-mode]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.locationMode === locationMode));
     button.disabled = busy || (active && button.dataset.locationMode === 'fixed');
   });
-  $('#add-route-stop').disabled = !selectedPlace || active || busy || routeStops.length >= 12;
-  $('#plan-route').disabled = routeStops.length < 2 || active || busy;
+  document.querySelectorAll('[data-route-mode]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.routeMode === mode));
+    button.disabled = active || busy;
+  });
+  $('#add-route-stop').disabled = !selectedPlace || active || busy || routeStops.length >= maximumStops;
+  $('#plan-route').disabled = routeStops.length < 2 || routeStops.length > maximumStops || active || busy;
+  $('#plan-route').textContent = isTrain ? 'Find direct train route' : 'Plan road route';
   $('#clear-route').disabled = !routeStops.length || active || busy;
+  setContent('#route-provider', isTrain
+    ? 'Pins must be within 2 km of stations on one direct train. Journey data by <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transitous sources</a>; railway overlay by <a href="https://www.openrailwaymap.org/" target="_blank" rel="noreferrer">OpenRailwayMap</a>.'
+    : 'Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.');
   setContent('#route-stops', routeStops.map((stop, i) => `<li><span class="route-stop-number">${i + 1}</span><div><strong>${esc(stop.label)}</strong><small>${i === 0 ? 'Start' : i === routeStops.length - 1 ? 'Destination' : 'Via'}</small></div><button class="icon-button" data-remove-stop="${i}" aria-label="Remove stop ${i + 1}" ${active || busy ? 'disabled' : ''}>${icon('x')}</button></li>`).join(''));
   document.querySelectorAll('[data-remove-stop]').forEach(button => { button.onclick = () => {
     routeStops.splice(Number(button.dataset.removeStop), 1); routePlan = null; drawRoute(); renderRoute(); paintIcons();
   }; });
   $('#route-summary').hidden = !routePlan;
-  if (routePlan) setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>45 mph · 1 sec updates</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.durationSeconds)} ${active ? 'remaining' : 'at 45 mph'}`}</p>`);
+  if (routePlan) {
+    const service = isTrain ? `${esc(routePlan.service || 'Train')} · ${speedLabel}` : '45 mph · 1 sec updates';
+    const timing = route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.durationSeconds)} ${active ? 'remaining' : isTrain ? 'scheduled travel' : 'at 45 mph'}`;
+    setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>${service}</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${timing}</p>`);
+  }
   const device = state.devices.find(d => d.id === selectedDeviceId);
   const otherSession = state.session && state.session.deviceId !== selectedDeviceId;
   const running = route?.status === 'running', paused = route?.status === 'paused';
   $('#route-play').disabled = busy || (active ? !running && (!paused || !device || otherSession || !['ready', 'setup-required'].includes(device.state)) : !routePlan || device?.state !== 'ready' || Boolean(otherSession));
-  $('#route-play').textContent = busy ? 'Working…' : running ? 'Pause route' : paused ? 'Resume route · 45 mph' : route?.status === 'completed' ? 'Route completed' : 'Start route · 45 mph';
-  $('#route-hint').textContent = active ? route.message : otherSession ? 'Restore the current session before switching phones.' : !routePlan ? 'Add a start and destination, then plan the route.' : !device ? 'Connect a phone to start. The route is ready.' : 'Start moves your phone to the first stop, then follows the road.';
+  const startLabel = isTrain ? `Start train · ~${Math.max(1, Math.round(speedMph))} mph` : 'Start route · 45 mph';
+  const resumeLabel = isTrain ? `Resume train · ~${Math.max(1, Math.round(speedMph))} mph` : 'Resume route · 45 mph';
+  $('#route-play').textContent = busy ? 'Working…' : running ? (isTrain ? 'Pause train' : 'Pause route') : paused ? resumeLabel : route?.status === 'completed' ? (isTrain ? 'Train trip completed' : 'Route completed') : startLabel;
+  $('#route-hint').textContent = active ? route.message : otherSession ? 'Restore the current session before switching phones.' : !routePlan
+    ? (isTrain ? 'Add two points near stations, then find a direct train.' : 'Add a start and destination, then plan the route.')
+    : !device ? 'Connect a phone to start. The route is ready.' : (isTrain ? 'Start moves your phone onto the train path.' : 'Start moves your phone to the first stop, then follows the road.');
   if (route?.point && inRoute) {
     const point = [route.point.latitude, route.point.longitude];
-    if (!routeDot) routeDot = L.circleMarker(point, { radius: 9, color: 'white', weight: 3, fillColor: '#087bff', fillOpacity: 1, className: 'route-location-dot', interactive: false }).addTo(map);
-    else routeDot.setLatLng(point);
+    const color = isTrain ? '#b52a6f' : '#087bff';
+    if (!routeDot) routeDot = L.circleMarker(point, { radius: 9, color: 'white', weight: 3, fillColor: color, fillOpacity: 1, className: 'route-location-dot', interactive: false }).addTo(map);
+    else { routeDot.setLatLng(point); routeDot.setStyle({ fillColor: color }); }
     routeDot.bringToFront();
   } else if (routeDot) { routeDot.remove(); routeDot = null; }
 }
@@ -478,8 +510,10 @@ function renderView() {
   $('#saved-nav-button').classList.toggle('active', showingSaved);
   $('#saved-nav-button').setAttribute('aria-pressed', String(showingSaved));
   $('#panel-eyebrow').textContent = showingSaved ? 'Library' : 'Location';
-  $('#panel-title').textContent = showingSaved ? 'Saved places' : locationMode === 'route' ? 'Follow a route' : 'Set a location';
-  $('#panel-subtitle').textContent = showingSaved ? 'Select a place to return to the map.' : locationMode === 'route' ? 'Choose stops. Move along the road at 45 mph.' : 'Choose a phone and a point on the map.';
+  $('#panel-title').textContent = showingSaved ? 'Saved places' : locationMode === 'route' ? (routeTravelMode === 'train' ? 'Follow a train' : 'Follow a route') : 'Set a location';
+  $('#panel-subtitle').textContent = showingSaved ? 'Select a place to return to the map.' : locationMode === 'route'
+    ? (routeTravelMode === 'train' ? 'Choose two station-area points. Move along the train path.' : 'Choose stops. Move along the road at 45 mph.')
+    : 'Choose a phone and a point on the map.';
 }
 
 function handoffPhone() {
@@ -570,14 +604,22 @@ $('#rerun-onboarding').onclick = () => { $('#settings-dialog').close(); openOnbo
 $('#save-button').onclick = () => openSave();
 $('#apply-button').onclick = () => { if (selectedPlace && selectedDeviceId) runOperation(() => api.applyLocation({ deviceId: selectedDeviceId, ...selectedPlace })); };
 document.querySelectorAll('[data-location-mode]').forEach(button => { button.onclick = () => { locationMode = button.dataset.locationMode; drawRoute(); render(); }; });
+document.querySelectorAll('[data-route-mode]').forEach(button => { button.onclick = () => {
+  if (state.route || pending) return;
+  routeTravelMode = button.dataset.routeMode;
+  routePlan = null;
+  if (routeTravelMode === 'train' && routeStops.length > 2) routeStops = routeStops.slice(0, 2);
+  drawRoute(); render();
+}; });
 $('#add-route-stop').onclick = () => {
-  if (!selectedPlace || routeStops.length >= 12) return;
+  const maximumStops = routeTravelMode === 'train' ? 2 : 12;
+  if (!selectedPlace || routeStops.length >= maximumStops) return;
   routeStops.push({ ...selectedPlace }); routePlan = null; drawRoute(); renderRoute(); paintIcons();
 };
 $('#clear-route').onclick = () => { routeStops = []; routePlan = null; drawRoute(); renderRoute(); paintIcons(); };
 $('#plan-route').onclick = async () => {
-  const planned = await runOperation(() => api.planRoute(routeStops));
-  if (planned) { routePlan = planned; drawRoute(); fitRoute(); renderRoute(); paintIcons(); }
+  const planned = await runOperation(() => api.planRoute({ mode: routeTravelMode, waypoints: routeStops }));
+  if (planned) { routePlan = planned; routeTravelMode = planned.mode || routeTravelMode; drawRoute(); fitRoute(); renderRoute(); paintIcons(); }
 };
 $('#route-play').onclick = () => runOperation(() => state.route?.status === 'running' ? api.pauseRoute() : state.route?.status === 'paused' ? api.resumeRoute() : api.startRoute({ deviceId: selectedDeviceId, routeId: routePlan?.id }));
 $('#restore-button').onclick = () => runOperation(() => api.stopLocation(), 'Restore command accepted. Phone apps may need a moment to refresh.', 'restore');
@@ -667,6 +709,6 @@ api.getState().then(async next => {
   acceptState(next);
   if (api.getRoute) {
     const planned = await api.getRoute();
-    if (planned) { routePlan = planned; routeStops = planned.waypoints; drawRoute(); renderRoute(); paintIcons(); }
+    if (planned) { routePlan = planned; routeTravelMode = planned.mode || 'road'; routeStops = planned.waypoints; drawRoute(); renderRoute(); paintIcons(); }
   }
 }).catch((error) => notify(`Ghost could not initialize: ${error.message}`, true));

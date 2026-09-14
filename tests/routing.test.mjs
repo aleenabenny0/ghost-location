@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Router, measurePath, pointAlong, distanceBetween, ROUTE_SPEED_MPS } from '../backend/routing.mjs';
+import { Router, measurePath, pointAlong, distanceBetween, decodePolyline, ROUTE_SPEED_MPS } from '../backend/routing.mjs';
 import { Controller } from '../backend/controller.mjs';
 import { defaults } from '../backend/store.mjs';
 
@@ -48,7 +48,57 @@ test('no-route, HTTP, malformed response and invalid stops fail without a straig
   for (const stops of [null, [], [plan.waypoints[0]], Array(13).fill(plan.waypoints[0]), [{latitude: 91, longitude: 0}, plan.waypoints[1]]]) await assert.rejects(router.plan(stops));
 });
 
-async function fixture(t, platform = 'ios', connection = 'usb') {
+test('Transitous train planning decodes rail geometry and uses scheduled duration', async () => {
+  assert.deepEqual(decodePolyline('??gEgE', 5), [[0, 0], [0.001, 0.001]]);
+  const calls = [];
+  const response = {
+    itineraries: [{
+      legs: [{
+        mode: 'REGIONAL_RAIL',
+        duration: 600,
+        displayName: 'Regional 7',
+        scheduledStartTime: '2026-09-14T12:00:00Z',
+        scheduledEndTime: '2026-09-14T12:10:00Z',
+        realTime: true,
+        cancelled: false,
+        legGeometry: {points: '??gEgE', precision: 5, length: 2},
+      }],
+    }],
+  };
+  const router = new Router({now: () => 1000, fetcher: async (...args) => {
+    calls.push(args);
+    return new Response(JSON.stringify(response));
+  }});
+  const result = await router.plan({mode: 'train', waypoints: [
+    {latitude: 0, longitude: 0, label: 'Station A'},
+    {latitude: 0.001, longitude: 0.001, label: 'Station B'},
+  ]});
+  const url = new URL(calls[0][0]);
+  assert.equal(url.hostname, 'api.transitous.org');
+  assert.equal(url.searchParams.get('transitModes'), 'RAIL');
+  assert.equal(url.searchParams.get('maxTransfers'), '0');
+  assert.equal(result.mode, 'train');
+  assert.equal(result.provider, 'Transitous');
+  assert.equal(result.service, 'Regional 7');
+  assert.equal(result.durationSeconds, 600);
+  assert.deepEqual(result.coordinates, [[0, 0], [0.001, 0.001]]);
+  close(result.speedMps, result.distanceMeters / 600);
+  assert.match(calls[0][1].headers['User-Agent'], /aleenabenny0\/ghost-location/);
+});
+
+test('train planning rejects extra stops, missing trips, and malformed geometry', async () => {
+  const points = [{latitude: 0, longitude: 0}, {latitude: 1, longitude: 1}];
+  const never = new Router({fetcher: () => assert.fail('Invalid train request reached the network')});
+  await assert.rejects(never.plan({mode: 'train', waypoints: [...points, points[0]]}), /exactly one start/);
+  const noTrip = new Router({fetcher: async () => new Response(JSON.stringify({itineraries: []}))});
+  await assert.rejects(noTrip.plan({mode: 'train', waypoints: points}), /No direct train trip/);
+  const malformed = new Router({fetcher: async () => new Response(JSON.stringify({itineraries: [{legs: [{
+    mode: 'RAIL', duration: 60, legGeometry: {points: '!', precision: 6, length: 1},
+  }]}]}))});
+  await assert.rejects(malformed.plan({mode: 'train', waypoints: points}), /geometry/);
+});
+
+async function fixture(t, platform = 'ios', connection = 'usb', routePlan = plan) {
   const phone = { id: `${platform}:USB123`, serial: 'USB123', platform, name: 'Test phone', connection, state: 'ready' };
   let timestamp = 0, devices = [phone];
   const calls = [], data = defaults(); data.preferences.connection = connection;
@@ -57,12 +107,26 @@ async function fixture(t, platform = 'ios', connection = 'usb') {
     set: async (device, point) => { calls.push(['set', device.id, {...point}]); return {}; },
     update: async (device, point) => { calls.push(['update', device.id, {...point}]); return {}; },
     clear: async () => calls.push(['clear']), reset: async () => calls.push(['reset']), dispose: async () => {}};
-  const c = new Controller({adapters: {[platform]: adapter}, store, router: {plan: async () => structuredClone(plan)}, clock: () => timestamp, now: () => Date.parse('2026-09-13T12:00:00Z') + timestamp});
-  await c.init(); await c.planRoute(plan.waypoints);
+  const c = new Controller({adapters: {[platform]: adapter}, store, router: {plan: async () => structuredClone(routePlan)}, clock: () => timestamp, now: () => Date.parse('2026-09-13T12:00:00Z') + timestamp});
+  await c.init(); await c.planRoute(routePlan.waypoints);
   t.after(() => c.dispose({restore: false}));
-  const start = () => c.startRoute({deviceId: phone.id, routeId: plan.id});
+  const start = () => c.startRoute({deviceId: phone.id, routeId: routePlan.id});
   return {c, phone, adapter, calls, data, start, advance: ms => { timestamp += ms; }, disconnect: () => {devices = [];}, reconnect: () => {devices = [phone];}, replace: () => {devices = [{...phone, id: `${platform}:SECOND`, serial: 'SECOND'}];}};
 }
+
+test('controller advances train routes using the plan speed instead of road speed', async t => {
+  const trainPlan = {...plan, id: 'train', mode: 'train', service: 'Test Rail', speedMps: 10, speedMph: 22.3694, durationSeconds: plan.distanceMeters / 10};
+  const f = await fixture(t, 'ios', 'usb', trainPlan);
+  await f.start();
+  f.calls.length = 0;
+  f.advance(1000);
+  await f.c.tickRoute();
+  const update = f.calls.find(call => call[0] === 'update');
+  close(distanceBetween([0, 0], [update[2].longitude, update[2].latitude]), 10);
+  assert.equal(f.c.state.route.mode, 'train');
+  assert.equal(f.c.state.route.service, 'Test Rail');
+  assert.match(f.c.state.route.message, /Test Rail/);
+});
 
 for (const connection of ['usb', 'wifi']) for (const platform of ['ios', 'android']) test(`${platform} ${connection} route sends one point per second, preserves session, and holds exact endpoint`, async t => {
   const f = await fixture(t, platform, connection); await f.start();

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add direct train route planning through Transitous with railway geometry, service details, and timetable-derived average speed.
+- Add Road/Train controls and an OpenRailwayMap overlay while preserving the existing road route flow.
+- Reuse one-second route playback, pause/resume, reconnection, destination hold, and restoration for train routes.
+- Add train geometry, provider validation, mode-aware speed, and renderer selector coverage.
+
 ## 0.1.7
 
 - Offer Switch to Wi-Fi after a working USB session when the computer has an active Wi-Fi interface.

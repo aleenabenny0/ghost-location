@@ -5,6 +5,10 @@ import { Router, measurePath, pointAlong, ROUTE_SPEED_MPS } from './routing.mjs'
 
 const REPLACEABLE_SESSION_STATUSES = new Set(['unknown', 'waiting', 'error']);
 const USABLE_REPLACEMENT_STATES = new Set(['ready', 'setup-required']);
+const routeSpeed = route => Number.isFinite(route?.speedMps) && route.speedMps > 0 ? route.speedMps : ROUTE_SPEED_MPS;
+const routeMotionMessage = route => route?.mode === 'train'
+  ? `Following ${route.service || 'the train route'} at about ${Math.round(route.speedMph || routeSpeed(route) * 3600 / 1609.344)} mph. Sending a location every second.`
+  : 'Following the road at 45 mph. Sending a location every second.';
 
 export class Controller extends EventEmitter {
   constructor({ adapters, store, now = Date.now, router = new Router(), clock = () => performance.now(), network = async () => ({wifi: false}) }) {
@@ -186,7 +190,7 @@ export class Controller extends EventEmitter {
       const resumeMotion = () => {
         if (wasRunning && this.state.route?.status === 'paused' && this.state.session?.status === 'active' && !this.closing && !this.suspended) {
           this.state.route.status = 'running';
-          this.state.route.message = 'Following the road at 45 mph. Sending a location every second.';
+          this.state.route.message = routeMotionMessage(this.state.route);
           this.routeStepAt = this.clock(); this.scheduleRouteTick();
         }
       };
@@ -292,7 +296,7 @@ export class Controller extends EventEmitter {
       // Journal before device mutation, so a crash cannot discard an unresolved session.
       try { await this.persist(); }
       catch (error) { this.state.session = previous; throw error; }
-      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', speedMph: 45, distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
+      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', mode: route.mode || 'road', provider: route.provider, service: route.service, speedMps: routeSpeed(route), speedMph: route.speedMph || 45, distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
       this.notify();
       this.resumeSessionId = wasLive ? current.id : null;
       this.retryAt = 0; this.retryAttempts = 0;
@@ -431,9 +435,9 @@ export class Controller extends EventEmitter {
   }
   async resume() { this.suspended = false; return this.scanDevices(); }
   getRoute() { return this.plannedRoute ? structuredClone(this.plannedRoute) : null; }
-  async planRoute(waypoints) {
+  async planRoute(input) {
     if (this.state.busy || (this.state.route && this.state.session)) throw new Error('Finish the current operation and restore real location before changing the route.');
-    const route = await this.router.plan(waypoints);
+    const route = await this.router.plan(input);
     if (this.state.busy || (this.state.route && this.state.session)) throw new Error('Finish the current operation and restore real location before changing the route.');
     this.plannedRoute = route;
     this.routePath = measurePath(route.coordinates);
@@ -446,7 +450,7 @@ export class Controller extends EventEmitter {
     await this.applyLocation({ deviceId, ...pointAlong(this.routePath, 0), label: `Route to ${route.waypoints.at(-1).label}` }, route);
     if (this.closing || this.suspended || this.state.session?.status !== 'active' || this.state.route?.status !== 'starting') return this.snapshot();
     this.state.route.status = 'running';
-    this.state.route.message = 'Following the road at 45 mph. Sending a location every second.';
+    this.state.route.message = routeMotionMessage(this.state.route);
     this.routeStepAt = this.clock();
     this.scheduleRouteTick(); this.notify(); return this.snapshot();
   }
@@ -479,7 +483,7 @@ export class Controller extends EventEmitter {
           await this.sessionEnded({ deviceId: current.deviceId, sessionId: current.id, error: error.message }); throw error;
         }
       }
-      route.status = 'running'; route.message = 'Following the road at 45 mph. Sending a location every second.';
+      route.status = 'running'; route.message = routeMotionMessage(route);
       this.routeStepAt = this.clock(); this.scheduleRouteTick();
     });
   }
@@ -505,12 +509,13 @@ export class Controller extends EventEmitter {
     const operation = async () => {
       try {
         const device = this.device(current.deviceId);
-        const distance = Math.min(route.distanceMeters, route.traveledMeters + ROUTE_SPEED_MPS * elapsed / 1000);
+        const speed = routeSpeed(route);
+        const distance = Math.min(route.distanceMeters, route.traveledMeters + speed * elapsed / 1000);
         const point = pointAlong(this.routePath, distance);
         // Record the attempted point before sending. Recovery holds this point;
         // it never advances the route while transport state is uncertain.
         Object.assign(current, point);
-        Object.assign(route, { point, traveledMeters: distance, remainingSeconds: (route.distanceMeters - distance) / ROUTE_SPEED_MPS });
+        Object.assign(route, { point, traveledMeters: distance, remainingSeconds: (route.distanceMeters - distance) / speed });
         const adapter = this.adapters[device.platform];
         const result = await (adapter.update ? adapter.update(device, { ...point, sessionId: current.id }) : adapter.set(device, { ...point, sessionId: current.id }));
         if (this.state.session !== current || current.status !== 'active' || this.closing) return;
