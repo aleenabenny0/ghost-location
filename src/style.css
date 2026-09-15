@@ -154,7 +154,7 @@ section { min-width: 0; }
 .show-saved .device-section, .show-saved .destination-section { display: none; }
 .show-saved .saved-section { margin-top: 0; padding-top: 0; border-top: 0; }
 
-.map-topbar { position: absolute; z-index: 600; top: 18px; left: 394px; right: 18px; display: flex; justify-content: center; align-items: flex-start; gap: 10px; pointer-events: none; }
+.map-topbar { position: absolute; z-index: 700; top: 18px; left: 394px; right: 18px; display: flex; justify-content: center; align-items: flex-start; gap: 10px; pointer-events: none; }
 .search-wrapper { position: relative; width: min(520px, calc(100% - 210px)); pointer-events: auto; }
 .search-box, .connection-badge, .map-button, .destination-callout, .session-status, .map-error {
   background: var(--glass-strong);
