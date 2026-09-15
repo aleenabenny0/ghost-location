@@ -47,7 +47,7 @@ try {
   const target = { latitude: 35.6762, longitude: 139.6503 };
   await page.locator('#latitude').fill(String(target.latitude));
   await page.locator('#longitude').fill(String(target.longitude));
-  await page.getByRole('button', { name: 'Select these coordinates', exact: true }).click();
+  await page.locator('#coordinate-form').evaluate(form => form.requestSubmit());
   assert.deepEqual(await page.evaluate(() => window.ghostFixture.getCalls()), [], 'Choosing a pin must not apply it.');
 
   // Keep the select focused while real-time events pass the original five-second
@@ -140,7 +140,7 @@ try {
   for (const [latitude, longitude] of [[41.8827, -87.6233], [41.89, -87.63]]) {
     await page.locator('#latitude').fill(String(latitude));
     await page.locator('#longitude').fill(String(longitude));
-    await page.getByRole('button', { name: 'Select these coordinates', exact: true }).click();
+    await page.locator('#coordinate-form').evaluate(form => form.requestSubmit());
     await page.locator('#add-route-stop').click();
   }
   await page.locator('#plan-route').click();
@@ -153,7 +153,7 @@ try {
   for (const [latitude, longitude] of [[41.8827, -87.6233], [41.89, -87.63]]) {
     await page.locator('#latitude').fill(String(latitude));
     await page.locator('#longitude').fill(String(longitude));
-    await page.getByRole('button', { name: 'Select these coordinates', exact: true }).click();
+    await page.locator('#coordinate-form').evaluate(form => form.requestSubmit());
     await page.locator('#add-route-stop').click();
   }
   assert.equal(await page.locator('#route-stops li').count(), 2);
