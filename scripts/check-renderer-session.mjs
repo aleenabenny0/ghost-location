@@ -27,6 +27,9 @@ let deadline = setTimeout(() => {
 try {
   application = await _electron.launch({ executablePath: electronPath, args: [fixture], cwd: root, env, timeout: 90_000 });
   const page = await application.firstWindow();
+  const capture = async output => {
+    if (!process.env.CI) await capture(output);
+  };
   clearTimeout(deadline);
   deadline = setTimeout(() => {
     console.error('FAIL: isolated renderer interactions exceeded 90 seconds.');
@@ -182,10 +185,10 @@ try {
   assert.equal(routeCalls[2].routeId, 'test-route');
   const artifacts = path.join(root, 'artifacts'); await mkdir(artifacts, {recursive: true});
   await page.waitForTimeout(1000);
-  await page.screenshot({path: path.join(artifacts, 'ghost-route-playback.png')});
+  await capture(path.join(artifacts, 'ghost-route-playback.png'));
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(960, 680));
   await page.locator('#route-play').scrollIntoViewIfNeeded();
-  await page.screenshot({path: path.join(artifacts, 'ghost-route-compact.png')});
+  await capture(path.join(artifacts, 'ghost-route-compact.png'));
   console.log('PASS: route stop selection, planning without device mutation, start/pause/resume, moving dot, and compact controls.');
   // Pairing drafts must survive state pushes, and secrets disappear on submit.
   await page.locator('#connection-options').click();
@@ -226,9 +229,9 @@ try {
     {method: 'connectWifi', platform: 'android', endpoint: '192.168.1.20:40567'},
   ]);
   await page.locator('#wifi-title').scrollIntoViewIfNeeded();
-  await page.screenshot({path: path.join(artifacts, 'ghost-wifi-android.png')});
+  await capture(path.join(artifacts, 'ghost-wifi-android.png'));
   await page.locator('#wifi-phone').selectOption('ios');
-  await page.screenshot({path: path.join(artifacts, 'ghost-wifi-iphone.png')});
+  await capture(path.join(artifacts, 'ghost-wifi-iphone.png'));
   await page.getByRole('button', {name: 'Close connection settings', exact: true}).click();
   assert.match(await page.locator('#connection-options').textContent(), /Wi-Fi/);
   console.log('PASS: Wi-Fi prompt, dismissal, active-route handoff, separate Android pairing/connect ports, persistent drafts and pairing-code cleanup.');
