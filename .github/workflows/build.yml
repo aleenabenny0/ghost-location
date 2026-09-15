@@ -62,6 +62,8 @@ jobs:
           GHOST_BUILD_PYTHON: ${{ steps.python.outputs.python-path }}
       - name: Test adapters and sidecar
         run: npm test
+      - name: Test isolated Electron renderer flow
+        run: npm run test:renderer-session
       - name: Build unsigned installers without publishing
         run: npm run dist -- --publish never --${{ matrix.arch }}
       - name: Upload installer artifacts
