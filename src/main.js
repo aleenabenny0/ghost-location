@@ -402,7 +402,8 @@ function renderRoute() {
   }; });
   $('#route-summary').hidden = !routePlan;
   if (routePlan) {
-    const service = isTrain ? `${esc(routePlan.service || 'Train')} · ${speedLabel}` : '45 mph · 1 sec updates';
+    const trainService = [routePlan.operator, routePlan.service].filter(Boolean).map(esc).join(' · ') || 'Train';
+    const service = isTrain ? `${trainService} · ${speedLabel}` : '45 mph · 1 sec updates';
     const timing = route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.durationSeconds)} ${active ? 'remaining' : isTrain ? 'scheduled travel' : 'at 45 mph'}`;
     setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>${service}</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${timing}</p>`);
   }
@@ -455,7 +456,10 @@ function renderSession() {
   const recovering = ['waiting', 'unknown', 'error'].includes(session?.status);
   const recoveryText = recovering ? `<span class="session-recovery">${session.autoReconnect ? 'Ghost will retry this phone automatically. Restore cancels retry.' : 'Reconnect this phone, then retry or restore.'}</span>` : '';
   const statusIcon = session?.status === 'reconnecting' ? 'refresh-cw' : session ? ['unknown', 'error', 'waiting'].includes(session.status) ? 'help-circle' : 'map-pin' : 'circle';
-  setContent('#session-status', `<span class="session-status-icon">${icon(statusIcon, session?.status === 'reconnecting' ? 'spin' : '')}</span><div><strong>${session ? session.status === 'active' && state.route ? ({ running: 'Following route · 45 mph', paused: 'Route paused', completed: 'Arrived', starting: 'Starting route…' }[state.route.status]) : labels[session.status] || 'Session needs attention' : 'Ready'}</strong><span>${esc(state.route?.message || session?.message || (session ? session.label || 'Keep your phone connected.' : state.devices.some((device) => device.state === 'ready') ? 'Choose a place to begin.' : 'Connect a phone and choose a place.'))}</span>${recoveryText}${refreshText}</div>${session?.status === 'active' ? '<span class="live-tag"><span></span>Active</span>' : ''}`);
+  const routeLabels = state.route?.mode === 'train'
+    ? { running: 'Following train', paused: 'Train paused', completed: 'Train arrived', starting: 'Starting train…' }
+    : { running: 'Following route · 45 mph', paused: 'Route paused', completed: 'Arrived', starting: 'Starting route…' };
+  setContent('#session-status', `<span class="session-status-icon">${icon(statusIcon, session?.status === 'reconnecting' ? 'spin' : '')}</span><div><strong>${session ? session.status === 'active' && state.route ? routeLabels[state.route.status] : labels[session.status] || 'Session needs attention' : 'Ready'}</strong><span>${esc(state.route?.message || session?.message || (session ? session.label || 'Keep your phone connected.' : state.devices.some((device) => device.state === 'ready') ? 'Choose a place to begin.' : 'Connect a phone and choose a place.'))}</span>${recoveryText}${refreshText}</div>${session?.status === 'active' ? '<span class="live-tag"><span></span>Active</span>' : ''}`);
 }
 
 function renderRuntime() {

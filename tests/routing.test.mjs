@@ -56,7 +56,8 @@ test('Transitous train planning decodes rail geometry and uses scheduled duratio
       legs: [{
         mode: 'REGIONAL_RAIL',
         duration: 600,
-        displayName: 'Regional 7',
+        displayName: 'Northeast Regional',
+        agencyName: 'Amtrak',
         scheduledStartTime: '2026-09-14T12:00:00Z',
         scheduledEndTime: '2026-09-14T12:10:00Z',
         realTime: true,
@@ -79,7 +80,8 @@ test('Transitous train planning decodes rail geometry and uses scheduled duratio
   assert.equal(url.searchParams.get('maxTransfers'), '0');
   assert.equal(result.mode, 'train');
   assert.equal(result.provider, 'Transitous');
-  assert.equal(result.service, 'Regional 7');
+  assert.equal(result.service, 'Northeast Regional');
+  assert.equal(result.operator, 'Amtrak');
   assert.equal(result.durationSeconds, 600);
   assert.deepEqual(result.coordinates, [[0, 0], [0.001, 0.001]]);
   close(result.speedMps, result.distanceMeters / 600);
@@ -92,6 +94,10 @@ test('train planning rejects extra stops, missing trips, and malformed geometry'
   await assert.rejects(never.plan({mode: 'train', waypoints: [...points, points[0]]}), /exactly one start/);
   const noTrip = new Router({fetcher: async () => new Response(JSON.stringify({itineraries: []}))});
   await assert.rejects(noTrip.plan({mode: 'train', waypoints: points}), /No direct train trip/);
+  const transfer = new Router({fetcher: async () => new Response(JSON.stringify({itineraries: [{legs: [
+    {mode: 'RAIL', duration: 60}, {mode: 'RAIL', duration: 60},
+  ]}]}))});
+  await assert.rejects(transfer.plan({mode: 'train', waypoints: points}), /No direct train trip/);
   const malformed = new Router({fetcher: async () => new Response(JSON.stringify({itineraries: [{legs: [{
     mode: 'RAIL', duration: 60, legGeometry: {points: '!', precision: 6, length: 1},
   }]}]}))});
@@ -115,7 +121,7 @@ async function fixture(t, platform = 'ios', connection = 'usb', routePlan = plan
 }
 
 test('controller advances train routes using the plan speed instead of road speed', async t => {
-  const trainPlan = {...plan, id: 'train', mode: 'train', service: 'Test Rail', speedMps: 10, speedMph: 22.3694, durationSeconds: plan.distanceMeters / 10};
+  const trainPlan = {...plan, id: 'train', mode: 'train', operator: 'Amtrak', service: 'Test Rail', speedMps: 10, speedMph: 22.3694, durationSeconds: plan.distanceMeters / 10};
   const f = await fixture(t, 'ios', 'usb', trainPlan);
   await f.start();
   f.calls.length = 0;
@@ -124,8 +130,9 @@ test('controller advances train routes using the plan speed instead of road spee
   const update = f.calls.find(call => call[0] === 'update');
   close(distanceBetween([0, 0], [update[2].longitude, update[2].latitude]), 10);
   assert.equal(f.c.state.route.mode, 'train');
+  assert.equal(f.c.state.route.operator, 'Amtrak');
   assert.equal(f.c.state.route.service, 'Test Rail');
-  assert.match(f.c.state.route.message, /Test Rail/);
+  assert.match(f.c.state.route.message, /Amtrak.*Test Rail/);
 });
 
 for (const connection of ['usb', 'wifi']) for (const platform of ['ios', 'android']) test(`${platform} ${connection} route sends one point per second, preserves session, and holds exact endpoint`, async t => {

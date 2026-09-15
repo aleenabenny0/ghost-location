@@ -168,8 +168,16 @@ searches for a current direct rail itinerary with stations within 2 km of those
 points, draws the returned train geometry, and shows an OpenRailwayMap overlay.
 
 Train planning uses the community-run Transitous MOTIS API and its underlying public
-transport data sources. The first version supports direct train trips only. Coverage
-and realtime information depend on the source agencies. The phone moves along the
+transport data sources. Transitous's current U.S. source configuration includes both
+[Amtrak scheduled data and Amtrak GTFS-Realtime trip updates](https://github.com/public-transport/transitous/blob/master/feeds/us.json),
+so direct Amtrak trips are supported when that feed returns a current itinerary and
+route geometry. Ghost displays the returned operator and service (for example,
+**Amtrak · Northeast Regional**) in the route summary.
+
+The first version supports direct train trips only. Coverage and realtime information
+depend on the source agencies. The OpenRailwayMap layer shows general physical railway
+infrastructure, not Amtrak-only tracks; playback follows only the itinerary geometry
+returned by Transitous. The phone moves along the
 returned rail geometry at a constant average speed calculated from the scheduled
 train-leg duration; it does not reproduce acceleration, braking, or station dwell
 timing point by point. Planning or previewing a train route never sends a location to

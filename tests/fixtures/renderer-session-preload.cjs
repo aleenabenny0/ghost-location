@@ -54,7 +54,14 @@ contextBridge.exposeInMainWorld('ghost', {
     const mode = Array.isArray(input) ? 'road' : input.mode;
     const stops = Array.isArray(input) ? input : input.waypoints;
     calls.push({method: 'planRoute', mode, stops});
-    plannedRoute = {id: 'test-route', mode, waypoints: stops, coordinates: [[-87.6233, 41.8827], [-87.6233, 41.89], [-87.63, 41.89]], distanceMeters: 1400, durationSeconds: 69.59, speedMps: 20.1168, speedMph: 45};
+    plannedRoute = {
+      id: 'test-route', mode, waypoints: stops,
+      coordinates: [[-87.6233, 41.8827], [-87.6233, 41.89], [-87.63, 41.89]],
+      distanceMeters: 1400,
+      ...(mode === 'train'
+        ? {durationSeconds: 34.79, speedMps: 40.24, speedMph: 90, provider: 'Transitous', operator: 'Amtrak', service: 'Northeast Regional'}
+        : {durationSeconds: 69.59, speedMps: 20.1168, speedMph: 45, provider: 'OSRM'}),
+    };
     return plannedRoute;
   },
   startRoute: async value => {

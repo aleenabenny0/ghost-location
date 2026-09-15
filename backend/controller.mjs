@@ -6,8 +6,9 @@ import { Router, measurePath, pointAlong, ROUTE_SPEED_MPS } from './routing.mjs'
 const REPLACEABLE_SESSION_STATUSES = new Set(['unknown', 'waiting', 'error']);
 const USABLE_REPLACEMENT_STATES = new Set(['ready', 'setup-required']);
 const routeSpeed = route => Number.isFinite(route?.speedMps) && route.speedMps > 0 ? route.speedMps : ROUTE_SPEED_MPS;
+const trainName = route => [route?.operator, route?.service].filter(Boolean).join(' · ') || 'the train route';
 const routeMotionMessage = route => route?.mode === 'train'
-  ? `Following ${route.service || 'the train route'} at about ${Math.round(route.speedMph || routeSpeed(route) * 3600 / 1609.344)} mph. Sending a location every second.`
+  ? `Following ${trainName(route)} at about ${Math.round(route.speedMph || routeSpeed(route) * 3600 / 1609.344)} mph. Sending a location every second.`
   : 'Following the road at 45 mph. Sending a location every second.';
 
 export class Controller extends EventEmitter {
@@ -296,7 +297,7 @@ export class Controller extends EventEmitter {
       // Journal before device mutation, so a crash cannot discard an unresolved session.
       try { await this.persist(); }
       catch (error) { this.state.session = previous; throw error; }
-      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', mode: route.mode || 'road', provider: route.provider, service: route.service, speedMps: routeSpeed(route), speedMph: route.speedMph || 45, distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
+      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', mode: route.mode || 'road', provider: route.provider, operator: route.operator, service: route.service, speedMps: routeSpeed(route), speedMph: route.speedMph || 45, distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
       this.notify();
       this.resumeSessionId = wasLive ? current.id : null;
       this.retryAt = 0; this.retryAttempts = 0;

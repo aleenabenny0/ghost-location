@@ -131,6 +131,18 @@ try {
   assert.equal(await page.locator('[data-route-mode="train"]').getAttribute('aria-pressed'), 'true');
   assert.match(await page.locator('#route-provider').textContent(), /Transitous.*OpenRailwayMap/);
   assert.equal(await page.locator('#plan-route').textContent(), 'Find direct train route');
+  for (const [latitude, longitude] of [[41.8827, -87.6233], [41.89, -87.63]]) {
+    await page.locator('#latitude').fill(String(latitude));
+    await page.locator('#longitude').fill(String(longitude));
+    await page.getByRole('button', { name: 'Select these coordinates', exact: true }).click();
+    await page.locator('#add-route-stop').click();
+  }
+  await page.locator('#plan-route').click();
+  await page.waitForFunction(() => !document.querySelector('#route-play').disabled);
+  assert.match(await page.locator('#route-summary').textContent(), /Amtrak.*Northeast Regional.*90 mph average/);
+  const trainPlanCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method === 'planRoute');
+  assert.equal(trainPlanCalls.at(-1).mode, 'train');
+  await page.locator('#clear-route').click();
   await page.locator('[data-route-mode="road"]').click();
   for (const [latitude, longitude] of [[41.8827, -87.6233], [41.89, -87.63]]) {
     await page.locator('#latitude').fill(String(latitude));

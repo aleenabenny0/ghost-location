@@ -157,20 +157,27 @@ export class Router {
     url.searchParams.set('detailedLegs', 'true');
     const data = await this.request(url, 'Could not plan the train route.');
     const candidates = Array.isArray(data.itineraries) ? data.itineraries : [];
-    const itinerary = candidates.find(item => item?.legs?.some(leg => TRAIN_MODES.has(leg.mode) && !leg.cancelled));
+    const activeRailLegs = item => Array.isArray(item?.legs)
+      ? item.legs.filter(leg => TRAIN_MODES.has(leg.mode) && !leg.cancelled)
+      : [];
+    // A direct trip has one active rail leg. Do not silently stitch transfers
+    // together if a provider ignores maxTransfers=0.
+    const itinerary = candidates.find(item => activeRailLegs(item).length === 1);
     if (!itinerary) throw new Error('No direct train trip was found near those points. Choose pins within 2 km of stations on the same service.');
-    const legs = itinerary.legs.filter(leg => TRAIN_MODES.has(leg.mode) && !leg.cancelled);
+    const legs = activeRailLegs(itinerary);
     const coordinates = joinTrainGeometry(legs);
     const path = measurePath(coordinates);
     const durationSeconds = legs.reduce((sum, leg) => sum + (Number.isFinite(leg.duration) ? leg.duration : 0), 0);
     if (durationSeconds < 1) throw new Error('The transit service returned invalid train timing.');
     const speedMps = path.distanceMeters / durationSeconds;
     const services = [...new Set(legs.map(leg => leg.displayName || leg.routeShortName || leg.routeLongName).filter(Boolean))];
+    const operators = [...new Set(legs.map(leg => leg.agencyName).filter(Boolean))];
     return {
       id: randomUUID(), mode: 'train', provider: 'Transitous', waypoints,
       coordinates: path.coordinates, distanceMeters: path.distanceMeters,
       durationSeconds, speedMps, speedMph: speedMps * 3600 / 1609.344,
       service: services.join(' → ') || 'Train',
+      operator: operators.join(' + ') || null,
       scheduledStartTime: legs[0]?.scheduledStartTime || legs[0]?.startTime || null,
       scheduledEndTime: legs.at(-1)?.scheduledEndTime || legs.at(-1)?.endTime || null,
       realTime: legs.some(leg => leg.realTime),
