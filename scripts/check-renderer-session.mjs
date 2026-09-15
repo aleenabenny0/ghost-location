@@ -169,10 +169,11 @@ try {
   await page.locator('#route-play').click();
   await page.waitForFunction(() => document.querySelector('#route-play').textContent === 'Pause route');
   const routeCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method !== 'applyLocation');
-  assert.deepEqual(routeCalls.map(c => c.method), ['planRoute', 'startRoute', 'pauseRoute', 'resumeRoute']);
-  assert.equal(routeCalls[0].mode, 'road');
-  assert.equal(routeCalls[1].deviceId, phone.id);
-  assert.equal(routeCalls[1].routeId, 'test-route');
+  assert.deepEqual(routeCalls.map(c => c.method), ['planRoute', 'planRoute', 'startRoute', 'pauseRoute', 'resumeRoute']);
+  assert.equal(routeCalls[0].mode, 'train');
+  assert.equal(routeCalls[1].mode, 'road');
+  assert.equal(routeCalls[2].deviceId, phone.id);
+  assert.equal(routeCalls[2].routeId, 'test-route');
   const artifacts = path.join(root, 'artifacts'); await mkdir(artifacts, {recursive: true});
   await page.waitForTimeout(1000);
   await page.screenshot({path: path.join(artifacts, 'ghost-route-playback.png')});
