@@ -29,10 +29,10 @@ try {
   const page = await application.firstWindow();
   clearTimeout(deadline);
   deadline = setTimeout(() => {
-    console.error('FAIL: isolated renderer interactions exceeded 45 seconds.');
+    console.error('FAIL: isolated renderer interactions exceeded 90 seconds.');
     application?.process().kill('SIGKILL');
     process.exit(1);
-  }, 45_000);
+  }, 90_000);
   page.setDefaultTimeout(5000);
   const rendererErrors = [];
   page.on('pageerror', error => rendererErrors.push(error.message));

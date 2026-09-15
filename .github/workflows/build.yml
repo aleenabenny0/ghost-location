@@ -2,6 +2,7 @@ name: Build native desktop installers
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
