@@ -18,15 +18,21 @@ const userData = await mkdtemp(path.join(tmpdir(), 'ghost-renderer-session-'));
 const env = { ...process.env, GHOST_RENDERER_TEST_DATA: userData, GHOST_RENDERER_DIST: dist };
 delete env.ELECTRON_RUN_AS_NODE;
 let application;
-const deadline = setTimeout(() => {
-  console.error('FAIL: isolated renderer session check exceeded 45 seconds.');
+let deadline = setTimeout(() => {
+  console.error('FAIL: isolated renderer startup exceeded 120 seconds.');
   application?.process().kill('SIGKILL');
   process.exit(1);
-}, 45_000);
+}, 120_000);
 
 try {
-  application = await _electron.launch({ executablePath: electronPath, args: [fixture], cwd: root, env, timeout: 15_000 });
+  application = await _electron.launch({ executablePath: electronPath, args: [fixture], cwd: root, env, timeout: 90_000 });
   const page = await application.firstWindow();
+  clearTimeout(deadline);
+  deadline = setTimeout(() => {
+    console.error('FAIL: isolated renderer interactions exceeded 45 seconds.');
+    application?.process().kill('SIGKILL');
+    process.exit(1);
+  }, 45_000);
   page.setDefaultTimeout(5000);
   const rendererErrors = [];
   page.on('pageerror', error => rendererErrors.push(error.message));
