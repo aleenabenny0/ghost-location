@@ -407,6 +407,13 @@ dialog[open] { animation: rise .18s ease-out; }
 .route-stops small { display: block; margin-top: 3px; color: var(--secondary); font-size: 12px; }
 .route-stop-number { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 auto; background: var(--fill); border-radius: 50%; font-size: 12px; }
 .route-plan-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.station-shortcut { margin-top: 8px; }
+.route-playback-controls { display: grid; gap: 10px; margin: 14px 0; }
+.route-playback-controls[hidden] { display: none; }
+.route-playback-controls label { display: block; margin-bottom: 7px; font-size: 12px; color: var(--secondary); }
+.route-control-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.route-control-row input { flex: 1; min-width: 70px; width: 80px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--text); }
+.route-control-row .text-button { text-align: left; }
 .route-provider { color: var(--secondary); font-size: 12px; line-height: 1.5; margin: 12px 0; }
 .route-summary { margin: 17px 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.5); }
 .route-summary > div { display: flex; flex-direction: column; gap: 5px; }

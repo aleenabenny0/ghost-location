@@ -178,11 +178,30 @@ The first version supports direct train trips only. Coverage and realtime inform
 depend on the source agencies. The OpenRailwayMap layer shows general physical railway
 infrastructure, not Amtrak-only tracks; playback follows only the itinerary geometry
 returned by Transitous. The phone moves along the
-returned rail geometry at a constant average speed calculated from the scheduled
+returned rail geometry at a constant speed, initially calculated from the returned
 train-leg duration; it does not reproduce acceleration, braking, or station dwell
 timing point by point. Planning or previewing a train route never sends a location to
 the phone. Starting it uses the same one-second device update, Pause, Resume,
 reconnection, destination hold, and Restore behavior as a road route.
+
+**Cary, NC (CYN)** is built in: search `CYN` or click **Add Cary, NC (CYN)** in Train
+mode. Its station coordinates (35.788294, -78.782246) come from
+[Amtrak's GTFS station feed](https://content.amtrak.com/content/gtfs/GTFS.zip), retrieved
+2026-09-15. The shortcut works offline; finding a trip still needs Transitous and a
+direct service to your selected destination.
+
+Set **Train speed (mph)** from 1 to 500 before starting or during playback, or
+return to **Use timetable average**. The custom range is a simulation setting,
+not a real train capability. **Use maximum** is available for identified Amtrak
+Piedmont services at 79 mph, based on [NCRR's corridor information](https://ncrr.com/faqs/).
+Other services show **Maximum unavailable**: the routing feed does not supply a
+verified maximum. This preset is not live tracking or a per-track speed limit.
+
+**Jump forward** advances by the entered minutes at the selected speed, following
+the planned geometry and preserving a paused route. **Skip to destination** moves
+immediately to the exact endpoint. Both need an active connection to the original
+phone. Jumps past the end stop at the destination and hold until **Restore real
+location**. These controls also work for road routes, whose speed remains 45 mph.
 
 ## Maps, search, and privacy
 

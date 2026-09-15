@@ -39,6 +39,8 @@ export function createPreviewBridge() {
     startRoute: desktopOnly,
     pauseRoute: desktopOnly,
     resumeRoute: desktopOnly,
+    setRouteSpeed: desktopOnly,
+    seekRoute: desktopOnly,
     installRuntime: desktopOnly,
     searchPlaces: async () => { throw new Error('Place search is available in the desktop app. In this preview, click the map or enter coordinates to choose a place.'); },
     savePlace: async (place) => {

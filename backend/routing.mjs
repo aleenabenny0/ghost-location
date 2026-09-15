@@ -172,10 +172,19 @@ export class Router {
     const speedMps = path.distanceMeters / durationSeconds;
     const services = [...new Set(legs.map(leg => leg.displayName || leg.routeShortName || leg.routeLongName).filter(Boolean))];
     const operators = [...new Set(legs.map(leg => leg.agencyName).filter(Boolean))];
+    // NCRR reports operations up to 79 mph: https://ncrr.com/faqs/
+    // Only Piedmont runs entirely on this corridor. Do not apply this limit
+    // to the Carolinian/Floridian or infer a maximum from timetable averages.
+    const piedmont = legs.every(leg => /\bamtrak\b/i.test(leg.agencyName || '') &&
+      /\bpiedmont\b/i.test([leg.displayName, leg.routeShortName, leg.routeLongName].filter(Boolean).join(' ')) &&
+      !/\bcarolinian\b/i.test([leg.displayName, leg.routeShortName, leg.routeLongName].filter(Boolean).join(' ')));
     return {
       id: randomUUID(), mode: 'train', provider: 'Transitous', waypoints,
       coordinates: path.coordinates, distanceMeters: path.distanceMeters,
       durationSeconds, speedMps, speedMph: speedMps * 3600 / 1609.344,
+      scheduleSpeedMps: speedMps, speedMode: 'schedule',
+      maximumSpeedMph: piedmont ? 79 : null,
+      maximumSpeedLabel: piedmont ? 'Piedmont corridor maximum' : null,
       service: services.join(' → ') || 'Train',
       operator: operators.join(' + ') || null,
       scheduledStartTime: legs[0]?.scheduledStartTime || legs[0]?.startTime || null,

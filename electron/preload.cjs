@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('ghost', Object.freeze({
   startRoute: value => invoke('startRoute', value),
   pauseRoute: () => invoke('pauseRoute'),
   resumeRoute: () => invoke('resumeRoute'),
+  setRouteSpeed: value => invoke('setRouteSpeed', value),
+  seekRoute: value => invoke('seekRoute', value),
   searchPlaces: query => invoke('searchPlaces', query),
   savePlace: place => invoke('savePlace', place),
   deletePlace: id => invoke('deletePlace', id),

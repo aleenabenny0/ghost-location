@@ -297,7 +297,7 @@ export class Controller extends EventEmitter {
       // Journal before device mutation, so a crash cannot discard an unresolved session.
       try { await this.persist(); }
       catch (error) { this.state.session = previous; throw error; }
-      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', mode: route.mode || 'road', provider: route.provider, operator: route.operator, service: route.service, speedMps: routeSpeed(route), speedMph: route.speedMph || 45, distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
+      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', mode: route.mode || 'road', provider: route.provider, operator: route.operator, service: route.service, speedMode: route.speedMode, speedMps: routeSpeed(route), speedMph: route.speedMph || 45, distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.distanceMeters / routeSpeed(route), point, message: 'Sending the route start to your phone…' } : null;
       this.notify();
       this.resumeSessionId = wasLive ? current.id : null;
       this.retryAt = 0; this.retryAttempts = 0;
@@ -455,6 +455,71 @@ export class Controller extends EventEmitter {
     this.routeStepAt = this.clock();
     this.scheduleRouteTick(); this.notify(); return this.snapshot();
   }
+  async setRouteSpeed({ routeId, mode, speedMph } = {}) {
+    return this.exclusive(async () => {
+      const plan = this.plannedRoute, route = this.state.route;
+      if (!plan || plan.id !== routeId || plan.mode !== 'train') throw new Error('Plan a train route before changing speed.');
+      if (route && (route.id !== routeId || !['running', 'paused'].includes(route.status))) throw new Error('This route cannot change speed.');
+      if (!['schedule', 'custom', 'maximum'].includes(mode)) throw new Error('Choose timetable average, custom speed, or maximum speed.');
+      const scheduleSpeedMps = plan.scheduleSpeedMps ?? routeSpeed(plan);
+      const mph = mode === 'schedule' ? scheduleSpeedMps * 3600 / 1609.344 : mode === 'maximum' ? plan.maximumSpeedMph : speedMph;
+      if (mode === 'maximum' && !Number.isFinite(mph)) throw new Error('No verified maximum is available for this service. Set a custom mph instead.');
+      if (!Number.isFinite(mph) || mph <= 0 || (mode === 'custom' && (mph < 1 || mph > 500))) throw new Error('Enter a speed from 1 to 500 mph.');
+      const speedMps = mph * 1609.344 / 3600;
+      Object.assign(plan, { scheduleSpeedMps, speedMode: mode, speedMph: mph, speedMps });
+      if (route) {
+        Object.assign(route, { speedMode: mode, speedMph: mph, speedMps, remainingSeconds: (route.distanceMeters - route.traveledMeters) / speedMps });
+        if (route.status === 'running') route.message = routeMotionMessage(route);
+        this.routeStepAt = this.clock(); this.scheduleRouteTick();
+      }
+    });
+  }
+  async seekRoute({ routeId, seconds, toEnd } = {}) {
+    if (!((toEnd === true && seconds === undefined) ||
+      (toEnd === undefined && Number.isFinite(seconds) && seconds > 0 && seconds <= 86400))) {
+      throw new Error('Choose a forward jump of up to 24 hours, or skip to the destination.');
+    }
+    return this.exclusive(async () => {
+      const route = this.state.route, current = this.state.session;
+      if (!route || route.id !== routeId || !['running', 'paused'].includes(route.status)) throw new Error('Start a route before jumping forward.');
+      if (this.suspended || this.closing || current?.status !== 'active' || current.deviceId !== route.deviceId) throw new Error('Reconnect and resume the original phone before jumping forward.');
+      const distance = toEnd ? route.distanceMeters : Math.min(route.distanceMeters, route.traveledMeters + routeSpeed(route) * seconds);
+      clearTimeout(this.routeTimer); this.routeTimer = null;
+      this.routeUpdate = this.sendRoutePoint(route, current, distance, this.clock(), true);
+      try { await this.routeUpdate; }
+      catch (error) {
+        await this.sessionEnded({ deviceId: current.deviceId, sessionId: current.id, error: `Route paused: ${error.message}` });
+        throw error;
+      } finally {
+        this.routeUpdate = null;
+        this.routeStepAt = this.clock(); this.scheduleRouteTick();
+      }
+    });
+  }
+  async sendRoutePoint(route, current, distance, started, journal = false) {
+    const device = this.device(current.deviceId);
+    const point = pointAlong(this.routePath, distance);
+    // Recovery must hold the attempted point if the phone's acknowledgement is lost.
+    Object.assign(current, point);
+    Object.assign(route, { point, traveledMeters: distance, remainingSeconds: (route.distanceMeters - distance) / routeSpeed(route) });
+    if (journal) await this.persist();
+    if (this.state.session !== current || current.status !== 'active' || this.closing || this.suspended) throw new Error('The connection was interrupted.');
+    const adapter = this.adapters[device.platform];
+    const result = await (adapter.update ? adapter.update(device, { ...point, sessionId: current.id }) : adapter.set(device, { ...point, sessionId: current.id }));
+    if (this.state.session !== current || current.status !== 'active' || this.closing || this.suspended) return;
+    current.lastRefreshAt = result?.refreshedAt || new Date(this.now()).toISOString();
+    current.refreshCount = (current.refreshCount || 0) + 1;
+    current.refreshIntervalMs = 1000; current.refreshSource = 'command-ack';
+    if (distance >= route.distanceMeters) {
+      clearTimeout(this.routeTimer); this.routeTimer = null;
+      route.status = 'completed'; route.message = 'Arrived. Your phone holds the destination until you restore real location.';
+      await this.persist();
+    } else if (this.clock() - started >= 1000) {
+      this.pauseRouteMotion('Location updates are taking longer than a second. Check the connection, then resume.');
+      await this.persist();
+    }
+    this.notify();
+  }
   pauseRouteMotion(message = 'Paused. Your phone holds the last route location.') {
     clearTimeout(this.routeTimer); this.routeTimer = null;
     if (this.state.route && ['running', 'starting'].includes(this.state.route.status)) {
@@ -509,28 +574,9 @@ export class Controller extends EventEmitter {
     this.routeStepAt = started;
     const operation = async () => {
       try {
-        const device = this.device(current.deviceId);
         const speed = routeSpeed(route);
         const distance = Math.min(route.distanceMeters, route.traveledMeters + speed * elapsed / 1000);
-        const point = pointAlong(this.routePath, distance);
-        // Record the attempted point before sending. Recovery holds this point;
-        // it never advances the route while transport state is uncertain.
-        Object.assign(current, point);
-        Object.assign(route, { point, traveledMeters: distance, remainingSeconds: (route.distanceMeters - distance) / speed });
-        const adapter = this.adapters[device.platform];
-        const result = await (adapter.update ? adapter.update(device, { ...point, sessionId: current.id }) : adapter.set(device, { ...point, sessionId: current.id }));
-        if (this.state.session !== current || current.status !== 'active' || this.closing) return;
-        current.lastRefreshAt = result?.refreshedAt || new Date(this.now()).toISOString();
-        current.refreshCount = (current.refreshCount || 0) + 1;
-        current.refreshIntervalMs = 1000; current.refreshSource = 'command-ack';
-        if (distance >= route.distanceMeters) {
-          route.status = 'completed'; route.message = 'Arrived. Your phone holds the destination until you restore real location.';
-          await this.persist();
-        } else if (this.clock() - started >= 1000) {
-          this.pauseRouteMotion('Location updates are taking longer than a second. Check the connection, then resume.');
-          await this.persist();
-        }
-        this.notify();
+        await this.sendRoutePoint(route, current, distance, started);
       } catch (error) {
         await this.sessionEnded({ deviceId: current.deviceId, sessionId: current.id, error: `Route paused: ${error.message}` });
       }

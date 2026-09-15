@@ -3,10 +3,110 @@ import assert from 'node:assert/strict';
 import { Router, measurePath, pointAlong, distanceBetween, decodePolyline, ROUTE_SPEED_MPS } from '../backend/routing.mjs';
 import { Controller } from '../backend/controller.mjs';
 import { defaults } from '../backend/store.mjs';
+import { CARY_STATION, stationMatches } from '../src/stations.js';
 
 const close = (a, b, epsilon = 0.001) => assert.ok(Math.abs(a - b) < epsilon, `${a} differs from ${b}`);
 const path = measurePath([[0, 0], [0.001, 0], [0.001, 0.001]]);
 const plan = { id: 'road', coordinates: path.coordinates, distanceMeters: path.distanceMeters, durationSeconds: path.distanceMeters / ROUTE_SPEED_MPS, waypoints: [{latitude: 0, longitude: 0, label: 'Start'}, {latitude: 0.001, longitude: 0.001, label: 'End'}] };
+const speedPlan = { ...plan, id: 'train-speed', mode: 'train', operator: 'Amtrak', service: 'Piedmont', speedMps: 10, speedMph: 10 * 3600 / 1609.344, maximumSpeedMph: 79, durationSeconds: plan.distanceMeters / 10 };
+
+test('CYN and Cary aliases select the Amtrak station, not the city center', () => {
+  for (const query of ['CYN', ' cary, NC ', 'Cary station']) assert.deepEqual(stationMatches(query), [CARY_STATION]);
+  assert.deepEqual(stationMatches('Cary Illinois'), []);
+  assert.equal(CARY_STATION.latitude, 35.788294);
+  assert.equal(CARY_STATION.longitude, -78.782246);
+});
+
+test('only identified Amtrak Piedmont trips receive the corridor maximum preset', async () => {
+  for (const [agencyName, displayName, maximum] of [['Amtrak', 'Piedmont 73', 79], ['Amtrak', 'Carolinian / Piedmont', null], ['Amtrak', 'Floridian', null], ['Other operator', 'Piedmont', null]]) {
+    const router = new Router({fetcher: async () => new Response(JSON.stringify({itineraries: [{legs: [{mode: 'RAIL', agencyName, displayName, duration: 600, legGeometry: {points: '??gEgE', precision: 5, length: 2}}]}]}))});
+    assert.equal((await router.plan({mode: 'train', waypoints: plan.waypoints})).maximumSpeedMph, maximum);
+  }
+});
+
+test('train speed can be set before start without phone commands, changed live, and reset to average', async t => {
+  const f = await fixture(t, 'ios', 'usb', speedPlan);
+  const set = (mode, speedMph) => f.c.setRouteSpeed({routeId: speedPlan.id, mode, speedMph});
+  await set('custom', 60);
+  assert.equal(f.calls.some(c => ['set', 'update'].includes(c[0])), false);
+  await f.start(); f.advance(1000); await f.c.tickRoute();
+  close(f.c.state.route.traveledMeters, 26.8224);
+  await set('maximum');
+  assert.equal(f.c.state.route.speedMph, 79);
+  f.advance(1000); await f.c.tickRoute();
+  close(f.c.state.route.traveledMeters, 26.8224 + 35.31616);
+  await f.c.pauseRoute(); await set('schedule');
+  close(f.c.state.route.speedMps, 10);
+  assert.equal(f.c.state.route.status, 'paused');
+  close(f.c.state.route.remainingSeconds, (plan.distanceMeters - f.c.state.route.traveledMeters) / 10);
+});
+
+test('invalid speeds, unknown maxima and stale route ids cannot change playback', async t => {
+  const f = await fixture(t, 'ios', 'usb', {...speedPlan, maximumSpeedMph: null});
+  for (const speedMph of [0, -1, NaN, Infinity, '60', 501]) await assert.rejects(f.c.setRouteSpeed({routeId: speedPlan.id, mode: 'custom', speedMph}));
+  await assert.rejects(f.c.setRouteSpeed({routeId: speedPlan.id, mode: 'maximum'}), /No verified maximum/);
+  await assert.rejects(f.c.setRouteSpeed({routeId: 'stale', mode: 'custom', speedMph: 60}));
+  assert.equal(f.c.getRoute().speedMps, 10);
+  assert.equal(f.calls.some(c => ['set', 'update'].includes(c[0])), false);
+});
+
+for (const paused of [false, true]) test(`forward jump follows corners and preserves ${paused ? 'paused' : 'running'} state`, async t => {
+  const f = await fixture(t, 'ios', 'usb', speedPlan); await f.start();
+  if (paused) await f.c.pauseRoute();
+  const id = f.c.state.session.id;
+  await f.c.seekRoute({routeId: speedPlan.id, seconds: 15});
+  close(f.c.state.route.traveledMeters, 150);
+  assert.deepEqual(f.c.state.route.point, pointAlong(path, 150));
+  assert.equal(f.c.state.route.status, paused ? 'paused' : 'running');
+  const updates = f.calls.filter(c => c[0] === 'update');
+  assert.equal(updates.length, 1); assert.equal(updates[0][1], f.phone.id); assert.equal(updates[0][2].sessionId, id);
+  assert.equal(f.data.session.latitude, f.c.state.route.point.latitude, 'Jump is journaled for recovery');
+});
+
+for (const platform of ['ios', 'android']) for (const input of [{toEnd: true}, {seconds: 86400}]) test(`${platform} skip or oversized forward distance holds exact endpoint`, async t => {
+  const f = await fixture(t, platform); await f.start();
+  await f.c.seekRoute({routeId: plan.id, ...input});
+  assert.deepEqual(f.c.state.route.point, {latitude: 0.001, longitude: 0.001});
+  assert.equal(f.c.state.route.status, 'completed'); assert.equal(f.c.state.route.remainingSeconds, 0);
+  assert.equal(f.c.routeTimer, null); assert.equal(f.c.state.session.status, 'active');
+  f.advance(1000); await f.c.tickRoute();
+  assert.equal(f.calls.filter(c => c[0] === 'update').length, 1);
+  await f.c.stopLocation(); assert.equal(f.c.state.session, null);
+});
+
+test('seek rejects malformed requests, stale routes, and disconnected phones without updates', async t => {
+  const f = await fixture(t); await f.start();
+  for (const input of [{seconds: 0}, {seconds: -1}, {seconds: Infinity}, {seconds: '5'}, {seconds: 86401}, {toEnd: true, seconds: 1}, {toEnd: false}, {}]) await assert.rejects(f.c.seekRoute({routeId: plan.id, ...input}));
+  await assert.rejects(f.c.seekRoute({routeId: 'old', toEnd: true}));
+  await f.c.sessionEnded({deviceId: f.phone.id, error: 'Disconnected'});
+  await assert.rejects(f.c.seekRoute({routeId: plan.id, toEnd: true}), /Reconnect/);
+  assert.equal(f.calls.filter(c => c[0] === 'update').length, 0);
+});
+
+test('seek waits for an in-flight tick, and cannot race a restore command', async t => {
+  const f = await fixture(t); await f.start();
+  let release;
+  f.adapter.update = async () => new Promise(resolve => { release = resolve; });
+  f.advance(1000); const tick = f.c.tickRoute();
+  const seek = f.c.seekRoute({routeId: plan.id, toEnd: true});
+  await assert.rejects(f.c.stopLocation(), /Wait/);
+  f.adapter.update = async (_device, point) => { f.calls.push(['jump', point]); return {}; };
+  release({}); await tick; await seek;
+  assert.equal(f.calls.filter(c => c[0] === 'jump').length, 1);
+  assert.equal(f.c.state.route.status, 'completed');
+  await f.c.stopLocation(); assert.equal(f.c.state.route, null);
+});
+
+test('failed jump retains attempted point for recovery and never claims arrival', async t => {
+  const f = await fixture(t); await f.start();
+  f.adapter.update = async () => { throw new Error('Acknowledgement lost'); };
+  await assert.rejects(f.c.seekRoute({routeId: plan.id, toEnd: true}), /Acknowledgement lost/);
+  assert.equal(f.c.state.route.status, 'paused');
+  assert.notEqual(f.c.state.session.status, 'active');
+  assert.equal(f.data.session.latitude, 0.001);
+  assert.equal(f.data.session.longitude, 0.001);
+  assert.equal(f.c.routeTimer, null);
+});
 
 test('45 mph advances 20.1168 metres each second along segments, including corners', () => {
   close(ROUTE_SPEED_MPS, 20.1168, 1e-12);

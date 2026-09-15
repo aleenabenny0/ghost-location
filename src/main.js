@@ -8,6 +8,7 @@ import {
   ChevronLeft,
 } from 'lucide';
 import { createPreviewBridge } from './preview.js';
+import { CARY_STATION, stationMatches } from './stations.js';
 
 const isPreview = !window.ghost;
 const detectedHost = /Windows/i.test(navigator.userAgent) ? 'windows' : 'mac';
@@ -140,11 +141,22 @@ $('#app').innerHTML = `
           <div id="route-controls" hidden>
             <div class="route-type-control"><span>Travel mode</span><div class="location-modes route-type-modes" role="group" aria-label="Route travel mode"><button data-route-mode="road" aria-pressed="true">Road</button><button data-route-mode="train" aria-pressed="false">Train</button></div></div>
             <button id="add-route-stop" class="secondary-button">${icon('plus')} Add selected pin to route</button>
+            <button id="add-cary-station" class="secondary-button station-shortcut" hidden>Add Cary, NC (CYN)</button>
             <ol id="route-stops" class="route-stops"></ol>
             <div class="route-plan-actions"><button id="plan-route" class="secondary-button">Plan road route</button><button id="clear-route" class="text-button">Clear</button></div>
             <p id="route-provider" class="route-provider">Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.</p>
             <div id="route-summary" class="route-summary" hidden></div>
+            <section id="train-speed-controls" class="route-playback-controls" aria-label="Train speed" hidden>
+              <form id="train-speed-form"><label for="train-speed">Train speed (mph)</label><div class="route-control-row"><input id="train-speed" type="number" min="1" max="500" step="any" required /><button id="apply-train-speed" class="secondary-button compact" type="submit">Set speed</button></div></form>
+              <div class="route-control-row"><button id="train-schedule-speed" class="text-button">Use timetable average</button><button id="train-max-speed" class="text-button">Use maximum</button></div>
+              <p id="train-speed-note" class="action-hint"></p>
+            </section>
             <button id="route-play" class="primary-button" disabled>Start route · 45 mph</button>
+            <section id="route-seek-controls" class="route-playback-controls" aria-label="Jump along route" hidden>
+              <form id="route-forward-form"><label for="route-forward-minutes">Fast-forward (minutes at selected speed)</label><div class="route-control-row"><input id="route-forward-minutes" type="number" min="0.1" max="1440" step="any" value="5" required /><button id="route-forward" class="secondary-button compact" type="submit">Jump forward</button></div></form>
+              <button id="route-skip" class="secondary-button">Skip to destination</button>
+              <p class="action-hint">Jumps move your phone immediately. The destination is held until you restore real location.</p>
+            </section>
             <p id="route-hint" class="action-hint">Add a start and destination, in order.</p>
           </div>
           <div id="fixed-actions"><button id="apply-button" class="primary-button" disabled><span>Set location</span>${icon('arrow-up-right')}</button><p id="apply-hint" class="action-hint">Connect a phone to get started.</p></div><button id="restore-button" class="restore-button" disabled>${icon('rotate-ccw')} Restore real location</button>
@@ -370,7 +382,8 @@ function renderRoute() {
   const isTrain = mode === 'train';
   const maximumStops = isTrain ? 2 : 12;
   const speedMph = route?.speedMph || routePlan?.speedMph || 45;
-  const speedLabel = isTrain ? `about ${Math.max(1, Math.round(speedMph))} mph average` : '45 mph';
+  const speedMode = route?.speedMode || routePlan?.speedMode || 'schedule';
+  const speedLabel = isTrain ? (speedMode === 'schedule' ? `about ${Math.max(1, Math.round(speedMph))} mph average` : `${Number(speedMph.toFixed(2))} mph · ${speedMode === 'maximum' ? 'maximum preset' : 'custom'}`) : '45 mph';
   const panel = $('.control-panel'), wasActive = panel.classList.contains('route-active');
   panel.classList.toggle('route-active', active);
   if (active && !wasActive) $('.panel-scroll').scrollTop = 0;
@@ -390,6 +403,8 @@ function renderRoute() {
     button.disabled = active || busy;
   });
   $('#add-route-stop').disabled = !selectedPlace || active || busy || routeStops.length >= maximumStops;
+  $('#add-cary-station').hidden = !isTrain || active;
+  $('#add-cary-station').disabled = busy || routeStops.length >= maximumStops || routeStops.some(stop => stop.id === CARY_STATION.id);
   $('#plan-route').disabled = routeStops.length < 2 || routeStops.length > maximumStops || active || busy;
   $('#plan-route').textContent = isTrain ? 'Find direct train route' : 'Plan road route';
   $('#clear-route').disabled = !routeStops.length || active || busy;
@@ -404,12 +419,29 @@ function renderRoute() {
   if (routePlan) {
     const trainService = [routePlan.operator, routePlan.service].filter(Boolean).map(esc).join(' · ') || 'Train';
     const service = isTrain ? `${trainService} · ${speedLabel}` : '45 mph · 1 sec updates';
-    const timing = route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.durationSeconds)} ${active ? 'remaining' : isTrain ? 'scheduled travel' : 'at 45 mph'}`;
+    const timing = route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.distanceMeters / (routePlan.speedMps || 20.1168))} ${active ? 'remaining' : isTrain ? 'playback time' : 'at 45 mph'}`;
     setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>${service}</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${timing}</p>`);
   }
   const device = state.devices.find(d => d.id === selectedDeviceId);
   const otherSession = state.session && state.session.deviceId !== selectedDeviceId;
   const running = route?.status === 'running', paused = route?.status === 'paused';
+  const editableSpeed = !busy && (!active || running || paused);
+  $('#train-speed-controls').hidden = !isTrain || !routePlan;
+  const appliedSpeed = `${routePlan?.id}:${speedMph}`;
+  if ($('#train-speed').dataset.applied !== appliedSpeed) {
+    $('#train-speed').value = String(Number(speedMph.toFixed(2)));
+    $('#train-speed').dataset.applied = appliedSpeed;
+  }
+  for (const id of ['train-speed', 'apply-train-speed', 'train-schedule-speed']) $(`#${id}`).disabled = !editableSpeed;
+  const maximum = routePlan?.maximumSpeedMph;
+  $('#train-max-speed').disabled = !editableSpeed || !Number.isFinite(maximum);
+  $('#train-max-speed').textContent = Number.isFinite(maximum) ? `Use maximum · ${maximum} mph` : 'Maximum unavailable';
+  $('#train-speed-note').textContent = Number.isFinite(maximum)
+    ? `${routePlan.maximumSpeedLabel}: ${maximum} mph. Constant simulation speed; actual trains slow down and stop.`
+    : 'No verified maximum for this service. Set custom mph or use its timetable average; this does not track live train speed.';
+  $('#route-seek-controls').hidden = !active;
+  const canSeek = !busy && (running || paused) && state.session?.status === 'active' && !otherSession && device?.state === 'ready';
+  for (const id of ['route-forward-minutes', 'route-forward', 'route-skip']) $(`#${id}`).disabled = !canSeek;
   $('#route-play').disabled = busy || (active ? !running && (!paused || !device || otherSession || !['ready', 'setup-required'].includes(device.state)) : !routePlan || device?.state !== 'ready' || Boolean(otherSession));
   const startLabel = isTrain ? `Start train · ~${Math.max(1, Math.round(speedMph))} mph` : 'Start route · 45 mph';
   const resumeLabel = isTrain ? `Resume train · ~${Math.max(1, Math.round(speedMph))} mph` : 'Resume route · 45 mph';
@@ -620,6 +652,23 @@ $('#add-route-stop').onclick = () => {
   if (!selectedPlace || routeStops.length >= maximumStops) return;
   routeStops.push({ ...selectedPlace }); routePlan = null; drawRoute(); renderRoute(); paintIcons();
 };
+$('#add-cary-station').onclick = () => {
+  if (state.route || pending || state.busy || routeStops.length >= 2) return;
+  selectPlace({ ...CARY_STATION });
+  routeStops.push({ ...CARY_STATION }); routePlan = null; drawRoute(); renderRoute(); paintIcons();
+};
+async function changeTrainSpeed(mode, speedMph) {
+  await runOperation(async () => {
+    const result = await api.setRouteSpeed({ routeId: routePlan?.id, mode, ...(mode === 'custom' ? { speedMph } : {}) });
+    routePlan = await api.getRoute();
+    return result;
+  });
+}
+$('#train-speed-form').onsubmit = event => { event.preventDefault(); changeTrainSpeed('custom', Number($('#train-speed').value)); };
+$('#train-schedule-speed').onclick = () => changeTrainSpeed('schedule');
+$('#train-max-speed').onclick = () => changeTrainSpeed('maximum');
+$('#route-forward-form').onsubmit = event => { event.preventDefault(); runOperation(() => api.seekRoute({ routeId: state.route?.id, seconds: Number($('#route-forward-minutes').value) * 60 })); };
+$('#route-skip').onclick = () => runOperation(() => api.seekRoute({ routeId: state.route?.id, toEnd: true }));
 $('#clear-route').onclick = () => { routeStops = []; routePlan = null; drawRoute(); renderRoute(); paintIcons(); };
 $('#plan-route').onclick = async () => {
   const planned = await runOperation(() => api.planRoute({ mode: routeTravelMode, waypoints: routeStops }));
@@ -690,9 +739,10 @@ $('#search-form').onsubmit = async (event) => {
   $('#search-results').innerHTML = `<div class="search-message">${icon('loader-circle', 'spin')} Searching…</div>`;
   paintIcons();
   try {
-    const results = await api.searchPlaces(query);
+    const stations = stationMatches(query);
+    const results = stations.length ? stations : await api.searchPlaces(query);
     if (request !== searchNumber) return;
-    $('#search-results').innerHTML = results.length ? results.slice(0, 7).map((place, index) => `<button class="search-result" data-result="${index}">${icon('map-pin')}<span><strong>${esc(place.label)}</strong><small>${Number(place.latitude).toFixed(5)}, ${Number(place.longitude).toFixed(5)}</small></span>${icon('arrow-up-right')}</button>`).join('') + '<div class="search-attribution">Search by Photon · © OpenStreetMap</div>' : '<div class="search-message">No places found. Try a nearby city or coordinates.</div>';
+    $('#search-results').innerHTML = results.length ? results.slice(0, 7).map((place, index) => `<button class="search-result" data-result="${index}">${icon('map-pin')}<span><strong>${esc(place.label)}</strong><small>${Number(place.latitude).toFixed(5)}, ${Number(place.longitude).toFixed(5)}</small></span>${icon('arrow-up-right')}</button>`).join('') + `<div class="search-attribution">${stations.length ? 'Station coordinates from Amtrak' : 'Search by Photon · © OpenStreetMap'}</div>` : '<div class="search-message">No places found. Try a nearby city or coordinates.</div>';
     document.querySelectorAll('[data-result]').forEach((button) => { button.onclick = () => { const place = results[Number(button.dataset.result)]; selectPlace(place); $('#search-input').value = place.label; }; });
   } catch (error) {
     if (request !== searchNumber) return;

@@ -28,7 +28,7 @@ try {
   application = await _electron.launch({ executablePath: electronPath, args: [fixture], cwd: root, env, timeout: 90_000 });
   const page = await application.firstWindow();
   const capture = async output => {
-    if (!process.env.CI) await capture(output);
+    if (!process.env.CI) await page.screenshot({ path: output });
   };
   clearTimeout(deadline);
   deadline = setTimeout(() => {
@@ -140,7 +140,13 @@ try {
   assert.equal(await page.locator('[data-route-mode="train"]').getAttribute('aria-pressed'), 'true');
   assert.match(await page.locator('#route-provider').textContent(), /Transitous.*OpenRailwayMap/);
   assert.equal(await page.locator('#plan-route').textContent(), 'Find direct train route');
-  for (const [latitude, longitude] of [[41.8827, -87.6233], [41.89, -87.63]]) {
+  await page.locator('#search-input').fill('CYN');
+  await page.locator('#search-form').evaluate(form => form.requestSubmit());
+  await page.getByRole('button', {name: /Cary, NC \(CYN\).*Amtrak/}).click();
+  assert.equal(await page.locator('#latitude').inputValue(), '35.788294');
+  await page.locator('#add-cary-station').click();
+  assert.match(await page.locator('#route-stops').textContent(), /Cary, NC \(CYN\)/);
+  for (const [latitude, longitude] of [[41.89, -87.63]]) {
     await page.locator('#latitude').fill(String(latitude));
     await page.locator('#longitude').fill(String(longitude));
     await page.locator('#coordinate-form').evaluate(form => form.requestSubmit());
@@ -148,9 +154,35 @@ try {
   }
   await page.locator('#plan-route').click();
   await page.waitForFunction(() => !document.querySelector('#route-play').disabled);
-  assert.match(await page.locator('#route-summary').textContent(), /Amtrak.*Northeast Regional.*90 mph average/);
+  assert.match(await page.locator('#route-summary').textContent(), /Amtrak.*Piedmont.*55 mph average/);
   const trainPlanCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method === 'planRoute');
   assert.equal(trainPlanCalls.at(-1).mode, 'train');
+  assert.equal(trainPlanCalls.at(-1).stops[0].longitude, -78.782246);
+  assert.equal((await page.evaluate(() => window.ghostFixture.getCalls())).some(c => c.method === 'searchPlaces'), false);
+  await page.locator('#train-speed').fill('60');
+  await page.evaluate(() => window.ghostFixture.setState({warning: null}));
+  assert.equal(await page.locator('#train-speed').inputValue(), '60', 'A heartbeat must preserve the speed draft.');
+  await page.locator('#train-speed-form').evaluate(form => form.requestSubmit());
+  await page.waitForFunction(() => document.querySelector('#route-summary').textContent.includes('60 mph · custom'));
+  assert.equal((await page.evaluate(() => window.ghostFixture.getCalls())).some(c => c.method === 'startRoute'), false);
+  await page.locator('#route-play').click();
+  await page.waitForFunction(() => document.querySelector('#route-play').textContent === 'Pause train');
+  await page.locator('#train-max-speed').click();
+  await page.waitForFunction(() => document.querySelector('#route-summary').textContent.includes('79 mph · maximum preset'));
+  await page.locator('#route-play').click();
+  await page.waitForFunction(() => document.querySelector('#route-play').textContent.includes('Resume train'));
+  await page.locator('#route-forward-minutes').fill('0.1');
+  await page.locator('#route-forward-form').evaluate(form => form.requestSubmit());
+  await page.waitForFunction(() => !document.querySelector('#route-forward').disabled);
+  assert.equal((await page.evaluate(() => window.ghost.getState())).route.status, 'paused');
+  await page.locator('#route-skip').click();
+  await page.waitForFunction(() => document.querySelector('#route-play').textContent === 'Train trip completed');
+  assert.equal(await page.locator('#route-skip').isDisabled(), true);
+  const seekCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method === 'seekRoute');
+  assert.deepEqual(seekCalls, [{method: 'seekRoute', routeId: 'test-route', seconds: 6}, {method: 'seekRoute', routeId: 'test-route', toEnd: true}]);
+  await page.locator('#restore-button').click();
+  await page.waitForFunction(() => !document.querySelector('#clear-route').disabled);
+  const roadCallStart = (await page.evaluate(() => window.ghostFixture.getCalls())).length;
   await page.locator('#clear-route').click();
   await page.locator('[data-route-mode="road"]').click();
   for (const [latitude, longitude] of [[41.8827, -87.6233], [41.89, -87.63]]) {
@@ -177,12 +209,11 @@ try {
   await page.waitForFunction(() => document.querySelector('#route-play').textContent.includes('Resume route'));
   await page.locator('#route-play').click();
   await page.waitForFunction(() => document.querySelector('#route-play').textContent === 'Pause route');
-  const routeCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method !== 'applyLocation');
-  assert.deepEqual(routeCalls.map(c => c.method), ['planRoute', 'planRoute', 'startRoute', 'pauseRoute', 'resumeRoute']);
-  assert.equal(routeCalls[0].mode, 'train');
-  assert.equal(routeCalls[1].mode, 'road');
-  assert.equal(routeCalls[2].deviceId, phone.id);
-  assert.equal(routeCalls[2].routeId, 'test-route');
+  const routeCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).slice(roadCallStart);
+  assert.deepEqual(routeCalls.map(c => c.method), ['planRoute', 'startRoute', 'pauseRoute', 'resumeRoute']);
+  assert.equal(routeCalls[0].mode, 'road');
+  assert.equal(routeCalls[1].deviceId, phone.id);
+  assert.equal(routeCalls[1].routeId, 'test-route');
   const artifacts = path.join(root, 'artifacts'); await mkdir(artifacts, {recursive: true});
   await page.waitForTimeout(1000);
   await capture(path.join(artifacts, 'ghost-route-playback.png'));
