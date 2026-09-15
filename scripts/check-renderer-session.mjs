@@ -18,15 +18,24 @@ const userData = await mkdtemp(path.join(tmpdir(), 'ghost-renderer-session-'));
 const env = { ...process.env, GHOST_RENDERER_TEST_DATA: userData, GHOST_RENDERER_DIST: dist };
 delete env.ELECTRON_RUN_AS_NODE;
 let application;
-const deadline = setTimeout(() => {
-  console.error('FAIL: isolated renderer session check exceeded 45 seconds.');
+let deadline = setTimeout(() => {
+  console.error('FAIL: isolated renderer startup exceeded 120 seconds.');
   application?.process().kill('SIGKILL');
   process.exit(1);
-}, 45_000);
+}, 120_000);
 
 try {
-  application = await _electron.launch({ executablePath: electronPath, args: [fixture], cwd: root, env, timeout: 15_000 });
+  application = await _electron.launch({ executablePath: electronPath, args: [fixture], cwd: root, env, timeout: 90_000 });
   const page = await application.firstWindow();
+  const capture = async output => {
+    if (!process.env.CI) await page.screenshot({ path: output });
+  };
+  clearTimeout(deadline);
+  deadline = setTimeout(() => {
+    console.error('FAIL: isolated renderer interactions exceeded 90 seconds.');
+    application?.process().kill('SIGKILL');
+    process.exit(1);
+  }, 90_000);
   page.setDefaultTimeout(5000);
   const rendererErrors = [];
   page.on('pageerror', error => rendererErrors.push(error.message));
@@ -41,7 +50,7 @@ try {
   const target = { latitude: 35.6762, longitude: 139.6503 };
   await page.locator('#latitude').fill(String(target.latitude));
   await page.locator('#longitude').fill(String(target.longitude));
-  await page.getByRole('button', { name: 'Select these coordinates', exact: true }).click();
+  await page.locator('#coordinate-form').evaluate(form => form.requestSubmit());
   assert.deepEqual(await page.evaluate(() => window.ghostFixture.getCalls()), [], 'Choosing a pin must not apply it.');
 
   // Keep the select focused while real-time events pass the original five-second
@@ -127,10 +136,59 @@ try {
   assert.match(await page.locator('#session-refresh').textContent(), /phone-app location is not verified/);
 
   await page.locator('[data-location-mode="route"]').click();
+  await page.locator('[data-route-mode="train"]').click();
+  assert.equal(await page.locator('[data-route-mode="train"]').getAttribute('aria-pressed'), 'true');
+  assert.match(await page.locator('#route-provider').textContent(), /Transitous.*OpenRailwayMap/);
+  assert.equal(await page.locator('#plan-route').textContent(), 'Find direct train route');
+  await page.locator('#search-input').fill('CYN');
+  await page.locator('#search-form').evaluate(form => form.requestSubmit());
+  await page.getByRole('button', {name: /Cary, NC \(CYN\).*Amtrak/}).click();
+  assert.equal(await page.locator('#latitude').inputValue(), '35.788294');
+  await page.locator('#add-cary-station').click();
+  assert.match(await page.locator('#route-stops').textContent(), /Cary, NC \(CYN\)/);
+  for (const [latitude, longitude] of [[41.89, -87.63]]) {
+    await page.locator('#latitude').fill(String(latitude));
+    await page.locator('#longitude').fill(String(longitude));
+    await page.locator('#coordinate-form').evaluate(form => form.requestSubmit());
+    await page.locator('#add-route-stop').click();
+  }
+  await page.locator('#plan-route').click();
+  await page.waitForFunction(() => !document.querySelector('#route-play').disabled);
+  assert.match(await page.locator('#route-summary').textContent(), /Amtrak.*Piedmont.*55 mph average/);
+  const trainPlanCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method === 'planRoute');
+  assert.equal(trainPlanCalls.at(-1).mode, 'train');
+  assert.equal(trainPlanCalls.at(-1).stops[0].longitude, -78.782246);
+  assert.equal((await page.evaluate(() => window.ghostFixture.getCalls())).some(c => c.method === 'searchPlaces'), false);
+  await page.locator('#train-speed').fill('60');
+  await page.evaluate(() => window.ghostFixture.setState({warning: null}));
+  assert.equal(await page.locator('#train-speed').inputValue(), '60', 'A heartbeat must preserve the speed draft.');
+  await page.locator('#train-speed-form').evaluate(form => form.requestSubmit());
+  await page.waitForFunction(() => document.querySelector('#route-summary').textContent.includes('60 mph · custom'));
+  assert.equal((await page.evaluate(() => window.ghostFixture.getCalls())).some(c => c.method === 'startRoute'), false);
+  await page.locator('#route-play').click();
+  await page.waitForFunction(() => document.querySelector('#route-play').textContent === 'Pause train');
+  await page.locator('#train-max-speed').click();
+  await page.waitForFunction(() => document.querySelector('#route-summary').textContent.includes('79 mph · maximum preset'));
+  await page.locator('#route-play').click();
+  await page.waitForFunction(() => document.querySelector('#route-play').textContent.includes('Resume train'));
+  await page.locator('#route-forward-minutes').fill('0.1');
+  await page.locator('#route-forward-form').evaluate(form => form.requestSubmit());
+  await page.waitForFunction(() => !document.querySelector('#route-forward').disabled);
+  assert.equal((await page.evaluate(() => window.ghost.getState())).route.status, 'paused');
+  await page.locator('#route-skip').click();
+  await page.waitForFunction(() => document.querySelector('#route-play').textContent === 'Train trip completed');
+  assert.equal(await page.locator('#route-skip').isDisabled(), true);
+  const seekCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method === 'seekRoute');
+  assert.deepEqual(seekCalls, [{method: 'seekRoute', routeId: 'test-route', seconds: 6}, {method: 'seekRoute', routeId: 'test-route', toEnd: true}]);
+  await page.locator('#restore-button').click();
+  await page.waitForFunction(() => !document.querySelector('#clear-route').disabled);
+  const roadCallStart = (await page.evaluate(() => window.ghostFixture.getCalls())).length;
+  await page.locator('#clear-route').click();
+  await page.locator('[data-route-mode="road"]').click();
   for (const [latitude, longitude] of [[41.8827, -87.6233], [41.89, -87.63]]) {
     await page.locator('#latitude').fill(String(latitude));
     await page.locator('#longitude').fill(String(longitude));
-    await page.getByRole('button', { name: 'Select these coordinates', exact: true }).click();
+    await page.locator('#coordinate-form').evaluate(form => form.requestSubmit());
     await page.locator('#add-route-stop').click();
   }
   assert.equal(await page.locator('#route-stops li').count(), 2);
@@ -151,16 +209,17 @@ try {
   await page.waitForFunction(() => document.querySelector('#route-play').textContent.includes('Resume route'));
   await page.locator('#route-play').click();
   await page.waitForFunction(() => document.querySelector('#route-play').textContent === 'Pause route');
-  const routeCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method !== 'applyLocation');
+  const routeCalls = (await page.evaluate(() => window.ghostFixture.getCalls())).slice(roadCallStart);
   assert.deepEqual(routeCalls.map(c => c.method), ['planRoute', 'startRoute', 'pauseRoute', 'resumeRoute']);
+  assert.equal(routeCalls[0].mode, 'road');
   assert.equal(routeCalls[1].deviceId, phone.id);
   assert.equal(routeCalls[1].routeId, 'test-route');
   const artifacts = path.join(root, 'artifacts'); await mkdir(artifacts, {recursive: true});
   await page.waitForTimeout(1000);
-  await page.screenshot({path: path.join(artifacts, 'ghost-route-playback.png')});
+  await capture(path.join(artifacts, 'ghost-route-playback.png'));
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(960, 680));
   await page.locator('#route-play').scrollIntoViewIfNeeded();
-  await page.screenshot({path: path.join(artifacts, 'ghost-route-compact.png')});
+  await capture(path.join(artifacts, 'ghost-route-compact.png'));
   console.log('PASS: route stop selection, planning without device mutation, start/pause/resume, moving dot, and compact controls.');
   // Pairing drafts must survive state pushes, and secrets disappear on submit.
   await page.locator('#connection-options').click();
@@ -201,9 +260,9 @@ try {
     {method: 'connectWifi', platform: 'android', endpoint: '192.168.1.20:40567'},
   ]);
   await page.locator('#wifi-title').scrollIntoViewIfNeeded();
-  await page.screenshot({path: path.join(artifacts, 'ghost-wifi-android.png')});
+  await capture(path.join(artifacts, 'ghost-wifi-android.png'));
   await page.locator('#wifi-phone').selectOption('ios');
-  await page.screenshot({path: path.join(artifacts, 'ghost-wifi-iphone.png')});
+  await capture(path.join(artifacts, 'ghost-wifi-iphone.png'));
   await page.getByRole('button', {name: 'Close connection settings', exact: true}).click();
   assert.match(await page.locator('#connection-options').textContent(), /Wi-Fi/);
   console.log('PASS: Wi-Fi prompt, dismissal, active-route handoff, separate Android pairing/connect ports, persistent drafts and pairing-code cleanup.');

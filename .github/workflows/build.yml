@@ -2,6 +2,7 @@ name: Build native desktop installers
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -13,8 +14,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  renderer:
+    name: isolated-renderer-flow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.0'
+          architecture: x64
+          cache: npm
+      - name: Install locked npm dependencies
+        run: npm ci
+      - name: Test isolated Electron renderer flow
+        run: xvfb-run --auto-servernum npm run test:renderer-session
+
   package:
     name: ${{ matrix.platform }}-${{ matrix.arch }}
+    needs: renderer
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:

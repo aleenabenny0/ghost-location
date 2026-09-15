@@ -23,6 +23,7 @@ The downloads include the phone runtimes. No programming tools or Ghost account 
 
 
 - Road routes through up to 12 stops, 45 mph movement, one-second updates, Pause and Resume.
+- Direct train routes between two station-area points, timetable-derived average speed, railway overlay, Pause and Resume.
 - Interactive map, manual place search, draggable pin, and latitude/longitude input.
 - First-run Mac/Windows and iPhone/Android survey with a checklist tailored to all four USB configurations.
 - Saved places and recent selections stored locally.
@@ -132,7 +133,7 @@ unresolved-record cleanup described above.
 An iPhone restart is a further recovery step if its developer simulation becomes
 stuck.
 
-## Route playback
+## Road and train route playback
 
 Choose **Route**, select a start using search, coordinates, or a map pin, and click
 **Add selected pin to route**. Repeat for the destination and any intermediate
@@ -159,13 +160,58 @@ Route geometry and progress stay in memory. Restarting Ghost does not resume a
 route; it keeps the existing recovery record for Retry or Restore. Restore before
 editing an active route or changing phones.
 
+### Train routes
+
+In **Route**, choose **Train**, then add exactly two points: one near the departure
+station and one near the arrival station. Click **Find direct train route**. Ghost
+searches for a current direct rail itinerary with stations within 2 km of those
+points, draws the returned train geometry, and shows an OpenRailwayMap overlay.
+
+Train planning uses the community-run Transitous MOTIS API and its underlying public
+transport data sources. Transitous's current U.S. source configuration includes both
+[Amtrak scheduled data and Amtrak GTFS-Realtime trip updates](https://github.com/public-transport/transitous/blob/master/feeds/us.json),
+so direct Amtrak trips are supported when that feed returns a current itinerary and
+route geometry. Ghost displays the returned operator and service (for example,
+**Amtrak · Northeast Regional**) in the route summary.
+
+The first version supports direct train trips only. Coverage and realtime information
+depend on the source agencies. The OpenRailwayMap layer shows general physical railway
+infrastructure, not Amtrak-only tracks; playback follows only the itinerary geometry
+returned by Transitous. The phone moves along the
+returned rail geometry at a constant speed, initially calculated from the returned
+train-leg duration; it does not reproduce acceleration, braking, or station dwell
+timing point by point. Planning or previewing a train route never sends a location to
+the phone. Starting it uses the same one-second device update, Pause, Resume,
+reconnection, destination hold, and Restore behavior as a road route.
+
+**Cary, NC (CYN)** is built in: search `CYN` or click **Add Cary, NC (CYN)** in Train
+mode. Its station coordinates (35.788294, -78.782246) come from
+[Amtrak's GTFS station feed](https://content.amtrak.com/content/gtfs/GTFS.zip), retrieved
+2026-09-15. The shortcut works offline; finding a trip still needs Transitous and a
+direct service to your selected destination.
+
+Set **Train speed (mph)** from 1 to 500 before starting or during playback, or
+return to **Use timetable average**. The custom range is a simulation setting,
+not a real train capability. **Use maximum** is available for identified Amtrak
+Piedmont services at 79 mph, based on [NCRR's corridor information](https://ncrr.com/faqs/).
+Other services show **Maximum unavailable**: the routing feed does not supply a
+verified maximum. This preset is not live tracking or a per-track speed limit.
+
+**Jump forward** advances by the entered minutes at the selected speed, following
+the planned geometry and preserving a paused route. **Skip to destination** moves
+immediately to the exact endpoint. Both need an active connection to the original
+phone. Jumps past the end stop at the destination and hold until **Restore real
+location**. These controls also work for road routes, whose speed remains 45 mph.
+
 ## Maps, search, and privacy
 
 Search sends your submitted text to the configured Photon provider. Viewing the map
 requests tiles from OpenStreetMap. Device identifiers and saved/session coordinates
-stay in the local application settings file. Planning a route sends the chosen
-stop coordinates (without device identifiers) to the public OSRM service. Route
-playback itself makes no routing-service requests. Search is rate-limited and cached for
+stay in the local application settings file. Planning a road route sends the chosen
+stop coordinates (without device identifiers) to the public OSRM service. Planning
+a train route sends the two selected coordinates to Transitous. Train mode also
+requests OpenRailwayMap overlay tiles. Route playback itself makes no routing-service
+requests. Search is rate-limited and cached for
 the running app; there is no autocomplete, background geocoding, or offline tile
 download. Pin and coordinate selection remain available if search fails.
 

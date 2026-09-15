@@ -86,6 +86,21 @@ Ghost displays command acknowledgements on iPhone and helper readbacks on Androi
 
 The speed is constant, regardless of road limits or traffic. The blue dot represents the last sent point. Keep Ghost running, the cable connected, and the computer awake. Minimizing Ghost does not stop playback. Unplugging, sleep, or slow updates pause movement; reconnect the same phone and press **Resume**. Restarting Ghost does not recover route geometry.
 
+## Follow a train route
+
+1. Select **Route**, then choose **Train**. The railway overlay appears on the map.
+2. Click **Add Cary, NC (CYN)** to use Cary as the next stop, or search `CYN`. Add another point within 2 km of a station on a direct service. Stops are ordered start, then destination.
+3. Click **Find direct train route**. This first version finds one direct current train service; transfers are not supported.
+4. Inspect the train line, service, distance, and playback time. Enter custom **Train speed (mph)** and click **Set speed**, or keep **Use timetable average**. **Use maximum · 79 mph** is available for identified Piedmont services; other services need a custom value when their maximum is unavailable.
+5. Click **Start train**. Ghost moves the phone along the returned railway geometry with one-second updates.
+6. Speed can also be changed while running or paused. Enter minutes and click **Jump forward** to advance that much playback time instantly. **Skip to destination** jumps to the final point and holds there. Pause, resume, and restore real location in the same way as a road route.
+
+Train coverage depends on the public transport feeds available through Transitous. The
+simulation uses a constant selected speed, initially calculated from the train path
+and returned duration. It does not reproduce acceleration, braking, every station
+dwell, or live train speed. Skipping does not restore real location; use **Restore
+real location** when finished.
+
 ## If something goes wrong
 
 | What you see | What to do |
